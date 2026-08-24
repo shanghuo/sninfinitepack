@@ -1,0 +1,30 @@
+# MC 模组开发环境 —— 仅用于开发 mcmod（新容器，不影响现有容器）
+services:
+  dev:
+    build:
+      context: ./dev
+      args:
+        PROXY: http://PROXY_HOST:7890
+    image: mcmod-dev:latest
+    container_name: mcmod-dev
+    restart: "no"
+    working_dir: /work/mcmod
+    environment:
+      HTTP_PROXY: http://PROXY_HOST:7890
+      HTTPS_PROXY: http://PROXY_HOST:7890
+      NO_PROXY: localhost,127.0.0.1
+      JAVA_HOME: /opt/java/openjdk
+      JAVA8_HOME: /opt/jdk8
+      GRADLE_USER_HOME: /root/.gradle
+    volumes:
+      - ./mcmod:/work/mcmod          # 模组源码（宿主可见/可编辑）
+      - ./dist:/work/dist            # 构建产物输出
+      - ./test:/work/test            # 测试服务器数据（从实例复制）
+      - ./scripts:/scripts           # 辅助脚本（bash 脚本，LF 行尾）
+      - gradle-home:/root/.gradle    # 持久化 gradle 缓存
+    stdin_open: true
+    tty: true
+    command: ["sleep", "infinity"]
+
+volumes:
+  gradle-home:

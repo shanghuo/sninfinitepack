@@ -1,0 +1,19 @@
+# ---- IDE ----
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# ---- 构建产物 / 缓存（mcmod 内已有自己的 .gitignore，这里兜底） ----
+mcmod/build/
+mcmod/.gradle/
+mcmod/run/
+mcmod/out/
+
+# ---- 测试服务器数据（从实例复制，体积大，不入库） ----
+test/
+
+# ---- 系统文件 ----
+.DS_Store
+Thumbs.db
