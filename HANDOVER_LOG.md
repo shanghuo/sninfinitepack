@@ -6,7 +6,7 @@
 
 ## 1. 项目一句话概述
 
-Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）** 的模组：玩家把任意物品放入背包物品后，可**无限取出**（属性/附魔/耐久/NBT 与放入时完全一致）。v1.1.0 起改为**计数制**——放入 +N、取出 -N、可为负（负数=无限透支），让玩家感知用了多少。
+Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）** 的模组：玩家把任意物品放入背包物品后，可**无限取出**（属性/附魔/耐久/NBT 与放入时完全一致）。现为**计数制**——放入 +N、取出 -N、可为负（负数=无限透支），让玩家感知用了多少。
 
 - MODID：`sninfinitepack`；显示名 `SN Infinite Pack`；版本 `1.0.0`（jar 名 `sninfinitepack-1.0.0.jar`）
 - 源码：`docker/mcmod/src/main/java/com/infpack/`
@@ -71,6 +71,13 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）** 的模组
 - 资源目录 `assets/infinitepack/` → `assets/sninfinitepack/`；lang 键 `itemGroup.sninfinitepack`；物品显示名 `SN 得一即无限背包`；GUI 标题加 `SN ` 前缀。
 - 配置：`gradle.properties`（modId/modName）、`addon.gradle`（modVersion）、`InfinitePackMod.java`（MODID/MODNAME）。
 - ⚠️ MODID 变更 = 新 mod：需从测试实例 mods **移除旧的 `infinitepack-*.jar`**（否则两个 mod 同时加载）；旧背包物品失效（全新 1.0.0 起点）。
+
+### 第 10 轮 — SN 收尾澄清 + git 初始化 + v1.1 立项（2026-08-25）
+- 命名澄清：**游戏内物品名/GUI 标题/创造标签都不加 SN**（仍是「得一即无限背包 / Infinite Pack」）；**模组名 `SN Infinite Pack` 与 modid `sninfinitepack` 保留**（只在模组列表/FML 日志可见，不影响游戏内 UI）。
+- 代码彩蛋：`InfinitePackMod.SN_FULL_NAME = "snang"`（SN 全称，仅代码可见；已验证编译进 jar 的 `InfinitePackMod.class`，不丢）。
+- 状态行整体上移 3px：`drawGuiContainerForegroundLayer` 的 y=131→128（约 0.3 字符高度）。
+- **git 初始化并首次提交**：`c:\project\mc\docker` 建仓，分支 `main`，commit `101938c`。`.gitignore` 排除 `mcmod/build|.gradle|run|out`、`test/`；`dist/` 入库（仅 sninfinitepack jar；已清掉 `build/libs` 里旧 infinitepack jar，防每次构建再复制进 dist）。
+- **v1.1 立项**（用户确认，本轮不做）：排序可切换 + 搜索 + UI 精简 + 海量存储改造。详见「第 9 节 v1.1 计划」。
 
 ---
 
@@ -173,8 +180,50 @@ Start-Process "C:\project\mc\nw-mc-20251224-test\prismlauncher.exe" -ArgumentLis
 
 ## 8. 待办 / 可选方向
 
+- [x] **v1.1：排序切换 + 搜索 + UI 精简 + 海量存储**（已立项，见第 9 节，下一轮开发）。
 - [ ] 真实服务器部署（等待用户决策/提供 ServerPack）。
 - [ ] `/infpacktest` 在真实服务器跑通。
 - [ ] 共享仓库 / 公会共享背包（全新设计，当前无）。
 - [ ] 创造模式禁止存入（可选，用户尚未决定）。
-- [ ] 更多 UI 打磨（如条目名称 tooltip、按计数排序等）。
+
+---
+
+## 9. v1.1 计划（下一轮开发，用户已确认；本轮不实现）
+
+### 9.1 目标功能（用户原话归纳）
+1. **顺序可切换排序**：`最近存取 / 数量升序 / 数量降序`（建议另保留 `默认=存入顺序` 作基态）。
+2. **搜索**：按物品名过滤。
+3. **UI 精简**：GUI 标题「得一即无限背包」→「**无限背包**」；状态行加**搜索框 + 排序方式切换**。
+4. **海量存储**：数据从「单物品 NBT 列表」迁到**独立存储文件 / 按背包 ID 索引**（解决条目上千时的 NBT 膨胀/数据包限制/O(n) 存入）。
+
+### 9.2 关键技术情报（本轮已验证，直接可用）
+- **FML 简易网络通道**（同步搜索/顺序到服务器）：
+  - `NetworkRegistry.INSTANCE.newSimpleChannel("name")` → `SimpleNetworkWrapper`（包 `cpw.mods.fml.common.network.simpleimpl`）。
+  - 消息接口：`IMessage`（`fromBytes/toBytes(ByteBuf)`）、`IMessageHandler<REQ,REPLY>`（`onMessage(REQ, MessageContext)`）。
+  - 注册：`wrapper.registerMessage(Handler.class, Msg.class, discriminator, Side.SERVER)`；客户端发：`wrapper.sendToServer(msg)`；服务端取玩家：`ctx.getServerHandler().playerEntity`。
+- **推荐架构（关键决策）：客户端算好「显示顺序」，发给服务器**
+  - 客户端按**本地化物品名**过滤+排序（中文搜索 OK），把**有序的真实条目索引列表**（int[]）通过上面的包发给服务器；服务器存为 `displayOrder`；`slotClick` 用 `displayOrder[scrollOffset+slotId]` 映射真实条目。
+  - **为什么不能两端各自过滤**：专用服务器无客户端语言，`getDisplayName()` 是英文/未本地化名 → 中文搜索两端结果不一致 → 点击映射错乱。所以**过滤只在客户端做，服务器只收顺序列表**。
+  - 排序模式因此**无需同步**（顺序列表本身携带信息），GUI 本地保存 sortMode 即可。
+- **实现要点**：
+  - `BackpackStorage.Entry` 加 `long lastAccess`（用 `world.getTotalWorldTime()`，随 NBT 持久化）→ 支撑「最近存取」。
+  - `EntriesInventory.getStackInSlot(i)` → `storage.getDisplayStack(displayOrder[scrollOffset+i])`。
+  - `slotClick` 的 `entryIndex` 全部改用 `getEntryIndexForSlot(slotId)`。
+  - 客户端任何存取/删除/搜索/切排序后 **markDirty → 下一 tick 重算顺序，仅在变化时发包**（避免每 tick 刷包）。
+  - 搜索框用 1.7.10 `GuiTextField`（注意本构建方法名 SRG/MCP 混用，先查反编译源 `build/rfg/.../GuiTextField.java`）。
+  - 物品显示名：`ItemStack.getDisplayName()`（确认 MCP 名）。
+
+### 9.3 海量存储（大改，需先定架构再动）
+- 现状：条目全在物品 NBT，**客户端显示也依赖从物品 NBT 重载/乐观更新**。迁到独立文件后客户端就拿不到数据 → **显示同步方案必须一起改**。
+- 方案 A（推荐）：物品 NBT 只存 `UUID`；服务器端 `BackpackDataManager` 把条目持久化到世界目录文件（如 `world/data/sninfinitepack/<uuid>.nbt`）；客户端显示数据由服务器经自定义包下发。
+- 方案 B（轻改）：保留物品 NBT，仅分页/压缩缓解，不根治。用户明确要「独立存储文件/按背包 ID 索引」，倾向 A。
+- 注意 1.7.10 数据包大小限制（大 NBT 同步/登录会出问题）。
+
+### 9.4 建议实施顺序
+1. 先做**排序**（默认/最近/数量↑/数量↓）——不依赖搜索，先建 displayOrder 骨架。
+2. 再做**搜索框 + 过滤 + 网络同步顺序**。
+3. 最后做**UI 精简**（标题「无限背包」+ 搜索框 + 排序切换布局）。
+4. 海量存储作为独立大项，先出架构方案给用户确认再动。
+
+### 9.5 验收
+- 切排序后格子顺序正确；搜索能按中文名过滤；搜索/排序状态下存入、取出、删除都命中正确条目；重开后顺序/搜索合理。
