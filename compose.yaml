@@ -4,14 +4,14 @@ services:
     build:
       context: ./dev
       args:
-        PROXY: http://PROXY_HOST:7890
+        PROXY: http://${PROXY_HOST:?请在 .env 设置 PROXY_HOST}
     image: mcmod-dev:latest
     container_name: mcmod-dev
     restart: "no"
     working_dir: /work/mcmod-1.7.10
     environment:
-      HTTP_PROXY: http://PROXY_HOST:7890
-      HTTPS_PROXY: http://PROXY_HOST:7890
+      HTTP_PROXY: http://${PROXY_HOST:?请在 .env 设置 PROXY_HOST}
+      HTTPS_PROXY: http://${PROXY_HOST:?请在 .env 设置 PROXY_HOST}
       NO_PROXY: localhost,127.0.0.1
       JAVA_HOME: /opt/java/openjdk
       JAVA8_HOME: /opt/jdk8

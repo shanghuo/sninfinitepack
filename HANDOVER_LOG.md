@@ -23,7 +23,7 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）+ 1.12.2 / F
 - **需求**：得一即无限。放入任一物品 → 无限取出；放入的物品带附魔/耐久/模组属性时，放入和取出必须一致；满耐久弓 vs 消耗过弓 = 两个独立条目，可选删除；删除后不可再取。
 - **决策**：
   - 所有开发在 Docker 完成（容器 `mcmod-dev`，JDK25 构建 + jabel→J8 字节码，GTNHGradle 2.0.20 / Gradle 9.3.1）。
-  - 网络代理 `http://PROXY_HOST:7890`（HTTP_PROXY/HTTPS_PROXY）。**网络故障由用户处理，不改源**。
+  - 网络代理由 `docker/.env` 的 `PROXY_HOST` 注入（HTTP_PROXY/HTTPS_PROXY）。**网络故障由用户处理，不改源**。
   - **绝不动真实实例** `nw-mc-20251224`（用户正在玩）；复制整份到 `nw-mc-20251224-test` 用于测试。
 - **实现**：`BackpackStorage`（NBT 精确匹配）、`NbtUtil`（深度 NBT 等价）、`ContainerInfinitePack`、`GuiInfinitePack`、`SlotInfiniteEntry`、`ItemInfinitePack`、`GuiHandler`、`CommonProxy`、`ClientProxy`。
 - **关键坑**：本构建 classpath 是 **partial-MCP**，很多方法名是 **SRG（`func_*`）**。直接用 RFG 反编译源码 `docker/mcmod-1.7.10/build/rfg/minecraft-src/java/` 里的名字写，编译和运行都对（reobf 后无 MCP 残留）。
