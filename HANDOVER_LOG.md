@@ -182,16 +182,68 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）+ 1.12.2 / F
 - **修复**：把模型登记从 `ClientProxy.init()` **移到 `preInit()`**（`super.preInit` 注册物品之后），这是 1.12.2 标准做法。字节码已验证：新 jar 的 preInit 含 `setCustomModelResourceLocation("sninfinitepack:infinitepack","inventory")`，init 已清空。
 - **部署状态（已部署 2026-08-25 17:46）**：用户关闭游戏后已替换 HMCL mods 里的 jar（`sninfinitepack-1.0.2-mc1.12.2.jar`，67236B）。下次进游戏应看到图标正常（若仍异常，看日志里 `ClientProxy 模型注册成功` 是否在 `Created: textures-atlas` 之前出现）。
 
+### 第 19 轮 — 计数显示统一 + 取出改为「拿到光标」（2026-08-25，两版本）
+- **用户反馈（对比两版本）**：①1.12.2 正数文本颜色不对/看不清；②1.7.10 数字文本大小有点过大；③物品很多时文本整体左偏移；④左键/右键单击应把东西**拿到鼠标上（光标）**，而非直接放进玩家背包（与 MC 容器操作习惯一致）。
+- **修复 ③（真 bug，两版本）**：计数缩放分支原来用**未缩放**的 `cx = 右缘 - textW` 定位，缩放后实际宽度只有 15px → 文本整体偏左。改为**按缩放后实际宽度定位**（`cx = guiLeft + s.xPos + 17 - textW * scale`），文本右缘始终贴槽位右缘。
+- **修复 ①②（两版本统一渲染）**：字号改**基础 0.85 倍**（比原版小一号，1.7.10 不再过大），仍超宽再等比缩小；1.12.2 之前"白色看不清"主因是含"万/亿"的文本宽度被高估 → 更早触发过度缩小 → 字迹偏小偏淡，统一字号后两版观感一致。颜色保持正数白 `0xFFFFFF`/非正数红 `0xFF4040`；**顺带修复 `count >= 0` 使 0 显示白色 → 改 `count > 0`，0 和负数都红色**（符合 README 设计）。统一走矩阵缩放路径。
+- **修复 ④（两版本）**：`slotClick` 空手取条目不再进玩家背包，改为**拿到光标**——左键=整组、右键=1 个到 `player.inventory.setItemStack`（同变体未满则合并，多余掉落作防御）；Shift+条目仍整组进玩家背包（MC 习惯）。新增 `withdrawToCursor`/`putOnCursor`（服务器权威 + 客户端乐观：客户端本地减计数并放光标，服务器执行后 `saveAndRefresh` + `resyncToClient` 收敛）。1.7.10 的 `EntityPlayerMP.setItemStack` 自动发 `S2FPacketSetSlot(-1,-1)` 同步光标；1.12.2 的 `resyncToClient` 已含 `SPacketSetSlot(-1,-1,cursor)`。
+- **构建/部署**：两版本构建成功（1.7.10 jar 63507B、1.12.2 jar 67561B，javap 验证含新方法）；已部署两测试实例并移除旧命名 jar（1.7.10 实例旧 `sninfinitepack-1.0.2.jar`、1.12.2 实例旧 `sninfinitepack-1.0.2.jar`），SHA256 与 dist 一致；游戏确认未运行（无 Prism/HMCL/游戏进程，javaw 7044 为 Services 会话后台服务）。**验证中**（需实测：取出到光标、计数显示观感）。
+
+### 第 19 轮补 — 1.12.2 计数变深 + Shift 点击进背包（2026-08-25，用户实测）
+- **用户反馈**：①1.12.2 数字整体偏深色（红白都变成接近黑灰/暗红）；②按住 Shift 单击左右键应直接进玩家背包（新逻辑只应影响不按 Shift 的单击）。
+- **修复 ①（1.12.2 根因）**：用户看到"黑灰/暗红"= `drawStringWithShadow` 的**阴影色**（`(color & 0xFCFCFC)>>2`：白→`0xFF3F3F3F`、红→`0xFF3C1010`），主文本（原色）没显示。1.12.2 用**缓存式 `GlStateManager`**（`setColor`→`GlStateManager.color`，仅颜色变化才调 GL11；FontRenderer 不操作深度），而原代码用**原生 `GL11.glDisable(DEPTH_TEST)`** 关深度 → 状态缓存与实际不一致 → 深度测试未真正关闭 → 阴影(z=0)先画写入 depth、主文本(z=0) 被 `GL_LESS` 拒绝 → 只剩阴影色。**修复**：改用 `GlStateManager.disableDepth()/enableDepth()`（缓存一致，1.12.2 正确做法）+ **手动两步绘制**（黑阴影 `drawString(text,1,1,0xFF000000)` z=+1 先画 + 主色 `drawString(text,0,0,color)` z=-1 后画，z 偏移保证深度测试下主色也覆盖），保留阴影避免浅色图标看不清，不用 `drawStringWithShadow`。javap 验证 SRG 名 `GlStateManager.func_179097_i`(disableDepth)/`func_179094_E`(pushMatrix)/`func_179109_b`(translate)/`func_179152_a`(scale)/`func_179121_F`(popMatrix) 已打入。
+- **修复 ②（两版本）**：`slotClick` 原未处理 `ClickType.QUICK_MOVE`（1.12.2）/`mode==1`（1.7.10），Shift+点击落入"空手取出→到光标"分支。**修复**：条目槽分支开头显式 `if (clickType == ClickType.QUICK_MOVE) return transferStackInSlot(player, slotId);`（1.12.2）/ `if (mode == 1) return transferStackInSlot(player, slotId);`（1.7.10）→ Shift+左右键整组直接进玩家背包。javap 验证 1.12.2 `ClickType.QUICK_MOVE` 分支、1.7.10 `func_82846_b`(transferStackInSlot) 调用已打入。
+- **构建/部署**：1.7.10 jar 63528B、1.12.2 jar 67612B；已替换两测试实例 mods（仅剩新 jar，无旧命名），SHA256 与 dist 一致；用户确认游戏已关（用户会话无 java 进程）。**验证中**。
+
+### 第 19 轮补 2 — 颜色再加固 + Shift 区分左右键（2026-08-25，用户实测）
+- **用户反馈**：①1.12.2 文本颜色问题依旧；②Shift+右键应直接到包 1 个、Shift+左键才整组（不能 Shift 不分左右都整组）。
+- **修复 ①（1.12.2 加固）**：在 `GlStateManager.disableDepth()` 基础上**临时把深度函数设为 `GL11.glDepthFunc(GL11.GL_ALWAYS)`**（兜底：即使深度测试被意外打开，计数文本也强制绘制覆盖图标），finally 恢复 `GL_LEQUAL`+`enableDepth`。绘制简化为**手动两步**（黑阴影 `drawString(text,1,1,0xFF000000)` + 主色 `drawString(text,0,0,color)`，去掉了上一轮的 z hack——由 GL_ALWAYS 保证主色覆盖）。javap 验证 `GL11.glDepthFunc` 调用（3 处）已打入。
+- **修复 ②（两版本）**：Shift 分支不再委托 `transferStackInSlot`（它不区分左右），改在 `slotClick` 的 `QUICK_MOVE`（1.12.2）/`mode==1`（1.7.10）分支里**按 `dragType`/`clickedButton` 区分**：右键(1)=取 1 个、左键(0)=取整组，走新增的 `shiftToInventory(player, slotId, amount)`（内部 `withdrawToInventory` 进玩家背包；amount<0=整组、>0=数量）。javap 验证两版 `shiftToInventory` + 1.12.2 `ClickType.QUICK_MOVE` 分支已打入。
+- **构建/部署**：1.7.10 jar 63680B、1.12.2 jar 67779B（10:27 构建）；已替换两测试实例（时间戳 18:27 + SHA256 97eb96/c76d04 与 dist 一致）；游戏已确认关闭（用户会话无 java 进程）。**验证中**。
+
+### 第 19 轮补 3 — 定位并修复「白字变黑」（1.12.2 颜色真正根因）（2026-08-25，用户实测）
+- **用户反馈**：白色数字"感觉像纯黑更多些"、字很细；红色"暗红就是暗红"（红色正常）。
+- **根因（决定性）**：**红色正常、白色变黑** → 1.12.2 `GlStateManager.color` 是**缓存式**（`colorState` 初始=白色；仅当目标色≠缓存时才调 `GL11.glColor4f`）。手动两步中阴影画完实际 GL=黑，若某刻 `colorState` 缓存恰为白色，则主色白色 `setColor(1,1,1,1)` 因**缓存==白色→不调 GL11**，实际 GL 颜色仍停留在阴影遗留的黑色 → 白色主色用黑色绘制（=纯黑）；而红色 `setColor(1,0.25,0.25)`≠缓存→正常调 GL11→红色正常。只显示黑阴影 → 字显得细。
+- **修复**：主色 `drawString` 前用**原生 `GL11.glColor4f(主色RGB, 1.0)` 强制设置实际 GL 颜色**（绕过 GlStateManager 缓存，白色也一定生效），再 `drawString`；字号 0.85→**0.9**（缓解字细）。javap 验证 `GL11.glColor4f`（1 处）+ `glDepthFunc`（3 处）已打入。
+- **构建/部署**：仅 1.12.2 改动，jar 67832B（11:40 构建），已替换 HMCL 实例（时间戳 19:40 + SHA256 3631aa 与 dist 一致）；1.7.10 未改动（10:27 jar 含 Shift 改动）。杀掉了用户会话残留 java 进程 PID 10804。**验证中**。
+
+### 第 19 轮补 4 — 白色仍完全不渲染 → 改 0xFFFEFE + drawStringWithShadow（2026-08-25，用户实测）
+- **用户反馈**：完全没有白色（纯黑），与字号无关（字号改回 0.85）。
+- **进一步定位**：红色正常、白色完全不渲染 → 纯白 `0xFFFFFF` 恰等于 `GlStateManager.colorState` 初始值 `(1,1,1,1)`，目标色==纯白时 `GlStateManager.color` 判断"无需设置"不调 GL11，而 GlStateManager 缓存与实际 GL 存在不同步 → 纯白用遗留色绘制（变黑）。GL11.glColor4f 强制设色理论上应绕过，但实测仍无白色（疑与 1.12.2 GlStateManager 内部状态机有关）。
+- **修复（决定性）**：正数颜色改 **`0xFFFEFE`**（≈纯白，差 1/255 人眼不可辨），`≠` 缓存 → **强制触发 GL11 设色**；绘制改回 **`drawStringWithShadow(text, 0, 0, color)`**（自带阴影，阴影=深灰、主文本=近白，两次 renderString 颜色必然不同→都强制调 GL11→主文本一定以近白渲染）。字号 0.9→0.85（用户要求）。javap 验证：手动 `glColor4f` 已移除(=0)、`drawStringWithShadow` 调用在、`glDepthFunc`(GL_ALWAYS/LEQUAL) 在。
+- **构建/部署**：仅 1.12.2，jar 67790B（11:46 构建），已替换 HMCL 实例（时间戳 19:46 + SHA256 27ffd7 与 dist 一致）；杀掉用户会话游戏进程 3 个（PID 3652/29052/12244，用户已开过游戏）。**验证中**。
+
+### 第 19 轮补 5 — 1.12.2 计数渲染回退为与 1.7.10 完全一致（2026-08-25，用户要求）
+- **用户决策**：1.12.2 数字文本显示问题大，先尽可能改到与 1.7.10 一致；**移除此前全部尝试**（GlStateManager.disableDepth、GL_ALWAYS/glDepthFunc、手动两步/GL11.glColor4f、0xFFFEFE）及尝试注释；用户待会自行排查。
+- **改动（1.12.2 GuiInfinitePack.drawScreen）**：计数渲染回退为与 1.7.10 完全相同的路径——原生 `GL11.glDisable(GL11.GL_DEPTH_TEST)`（finally `glEnable`）+ `GL11.glPushMatrix/glTranslatef/glScalef/glPopMatrix` + `fontRenderer.drawStringWithShadow(text, 0, 0, color)`；颜色恢复 `count > 0 ? 0xFFFFFF : 0xFF4040`；字号 0.85；右对齐（`cx = guiLeft + xPos + 17 - textW*scale`）。移除 `GlStateManager` import。javap 验证：`GlStateManager`/`glColor4f`/`glDepthFunc` 引用均为 0，仅剩原生 GL11（glDisable/glEnable/pushMatrix/translate/scale/popMatrix）+ `drawStringWithShadow`(func_175063_a)。
+- **构建/部署**：仅 1.12.2，jar 67752B（11:51 构建），已替换 HMCL 实例（时间戳 19:51 + SHA256 20c27a 与 dist 一致）；游戏确认关闭（无用户会话 java 进程）。**待用户排查**（若白色仍不显示，重点查 HMCL 环境的字体/着色器/其它 mod 对白色文本渲染的影响，1.7.10 同代码正常说明逻辑本身无问题）。
+
+### 第 20 轮 — 1.12.2 计数文本显示真正根因 + K/M/G + 右缘内收（2026-08-25，两版本，用户实测通过）
+- **用户反馈**：①1.12.2 计数文本颜色发糊/字号超小（1.7.10 正常），且"和中文（万/亿汉字）无关"；②数字右侧出去了约 3px；③缩写不要中文"万/亿"，改用 K/M/G。
+- **根因 ①（决定性，两处叠加）**：
+  - **blend/光照/COLOR_MATERIAL 遗留开启**：1.12.2 物品图标渲染（`RenderItem.renderItemModelIntoGUI`）结束只 `GlStateManager.enableBlend()` **无配对 disable**（1.7.10 的 `RenderItem` 渲染完会 `GL11.glDisable(GL11.GL_BLEND)`），且 `GuiContainer.drawScreen` 返回前 `RenderHelper.enableStandardItemLighting()` 开启光照+COLOR_MATERIAL → 计数文本在 blend 开+光照开下 `drawStringWithShadow` → 被混合/光照调制（发糊/残影）。**铁证**：Mojang 1.12.2 画物品数量文字（`renderItemOverlayIntoGUI`）前特意 `disableLighting + disableBlend`。
+  - **unicodeFlag 小字形**：1.12.2 中文环境 `Minecraft.isUnicode()`=true → **所有字符（含 ASCII 数字）走 unicode 半宽小字形（约 4px）**；1.7.10 英文环境 unicodeFlag=false → 数字走 default.png 全宽字体 → 1.12.2 数字字号远小于 1.7.10（"超小字号"）。
+- **修复（1.12.2 `GuiInfinitePack.drawScreen`）**：画计数文本前显式 `GlStateManager.disableLighting() + disableColorMaterial() + disableBlend() + enableAlpha()`（画完恢复，高亮/遮罩半透明仍需 blend）；计数文本绘制期间临时 `fontRenderer.setUnicodeFlag(false)`（数字走 default 字体，绘制后恢复；"万/亿"等中文不在 ASCII 表始终走 unicode 不受影响）。1.7.10 逻辑不变（其物品渲染后 blend 本来就关、英文环境 unicodeFlag=false），仅同步本次需求调整。
+- **需求调整（两版本）**：
+  - **右缘内收 4px**：`availW` 15→11、右缘 `guiLeft+xPos+17`→`+13`（左限制不变，长数字不再溢出槽外）。
+  - **缩写改 K/M/G**：`<1000` 原样；`<100万` 用 K（`1.2K`）；`<10亿` 用 M（`1.2M`）；否则用 G（`1.5G`）；负数前缀 `-`。替换原"万/亿"逻辑（`compactCount`）。
+- **构建/部署**：两版本 `--rerun-tasks` 强制重编译成功（gradle 对 bind-mount 文件时间戳判断偶发 up-to-date，需 `--rerun-tasks` 保险）；dist 四 jar 更新（1.7.10 63735B / 1.12.2 68032B）；已替换两测试实例 mods（备份 .bak，SHA256 与 dist 一致）；1.12.2 已启动实测。**用户实测两版本均通过**（颜色/字号/右缘/KMG 全部符合预期）。
+- **经验**：gradle + Windows bind-mount 修改源码后偶发误判 up-to-date，构建前用 `--rerun-tasks` 保险；1.12.2 中文环境画 GUI 数字文字须 `disableBlend + disableLighting + setUnicodeFlag(false)`。
+
+
+
+
+
 ---
 
 ## 3. 当前现状（1.0.2 · 文件 NBT 存储 + 强制生存）
 
 ### 已实现功能
 - **存入**：手拿物品点条目格（插到该格）/ Shift+玩家背包物品整组存入 → `count += 数量`。
-- **取出**：左键=整组、右键=1 个、Shift+条目=整组 → `count -= 数量`（可负，无限透支）。
+- **取出**：空手左键条目 = 整组**拿到光标**（鼠标上）、右键 = 1 个**拿到光标**、Shift+条目 = 整组进玩家背包（与 MC 容器操作习惯一致）→ `count -= 数量`（可负，无限透支）。
 - **删除**：右上角切换删除模式（红色遮罩），空手左键条目**两次确认**后删除该条目。
 - **滚动**：鼠标滚轮翻页（每 54 条一页）。
-- **计数显示**：条目格右下角数字，正=白、负/0=红；**大数缩写（万/亿）+ 超宽缩小字体**；**悬停显示精确数量 tooltip**。
+- **计数显示**：条目格右下角数字，正=白、0/负=红；**统一 0.85 倍字号 + 大数缩写（K/M/G）+ 超宽再缩小 + 右缘对齐内收**（不左偏移、不溢出槽外）；**悬停显示精确数量 tooltip**。
 - **变体精确匹配**：物品注册名 + 耐久 + 完整 NBT 深度等价 = 同一条目；满耐久弓 vs 耗弓、不同附魔/属性 = 独立条目。
 - **合成配方**：8 泥土 + 1 木头。
 - **持久化（存储改造）**：物品 NBT 只存 `infpack.uuid`；条目存服务器 `world/data/sninfinitepack/<uuid>.nbt`，随存档走，服务器权威；打开/操作时由服务器分包下发到客户端。
@@ -266,7 +318,7 @@ Start-Process "C:\project\mc\hmcl\HMCL-3.16.3.exe" -ArgumentList "--launch","1.1
 ### 验收清单
 1. 背包显示名正常（非 `item.inf...`）。
 2. 放入物品 → 条目出现、计数增加（白色正数）。
-3. 取出 → 计数减少；一直取到负数（红色）仍能取出；玩家背包即时显示取出的物品。
+3. 空手左键条目 → 整组拿到**光标**（鼠标上）、右键 → 1 个到光标、Shift+条目 → 整组进玩家背包；计数减少；一直取到负数（红色）仍能取出；光标即时显示取出的物品。
 4. 满耐久弓 vs 耗弓 = 两条独立条目；取出属性/附魔/NBT 与放入一致。
 5. 删除模式：第一次点击仅高亮，第二次同格才删除；点别处取消。
 6. 滚轮翻页正常。

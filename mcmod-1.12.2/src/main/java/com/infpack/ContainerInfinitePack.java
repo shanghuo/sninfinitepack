@@ -226,6 +226,10 @@ public class ContainerInfinitePack extends Container {
             if (clickType == ClickType.QUICK_CRAFT || clickType == ClickType.THROW || clickType == ClickType.PICKUP_ALL) {
                 return ItemStack.EMPTY; // 拖拽/丢弃(Q)/收集(双击)对条目槽无意义，忽略（避免误取出整组）
             }
+            if (clickType == ClickType.QUICK_MOVE) {
+                // Shift+左键=整组、Shift+右键=1个：直接进玩家背包（不是到光标）
+                return shiftToInventory(player, slotId, dragType == 1 ? 1 : -1);
+            }
             int entryIndex = getEntryIndexForSlot(slotId);
             ItemStack cursor = player.inventory.getItemStack();
 
@@ -263,17 +267,21 @@ public class ContainerInfinitePack extends Container {
                 return oldCursor;
             }
 
-            // 空手：取出（右键1个，其余整组）。客户端只减本地计数（物品由服务器下发+resync）
+            // 空手：取出到光标（左键=整组、右键=1个，与 MC 容器操作一致）。
+            // 客户端乐观更新（减计数 + 物品放光标），服务器权威执行后 resync 收敛。
             if (entryIndex < 0 || entryIndex >= storage.size()) {
                 return ItemStack.EMPTY;
             }
             int count = (clickType == ClickType.PICKUP && dragType == 1) ? 1 : -1;
             if (player.world.isRemote) {
-                storage.withdraw(entryIndex, count);
+                ItemStack out = storage.withdraw(entryIndex, count);
+                if (out != null && !out.isEmpty()) {
+                    putOnCursor(player, out);
+                }
                 InfinitePackMod.LOG.info("[infpack] client WITHDRAW idx={} count={}", entryIndex, storage.getCount(entryIndex));
                 return ItemStack.EMPTY;
             }
-            withdrawToInventory(player, entryIndex, count);
+            withdrawToCursor(player, entryIndex, count);
             return ItemStack.EMPTY;
         }
         return super.slotClick(slotId, dragType, clickType, player);
@@ -378,6 +386,55 @@ public class ContainerInfinitePack extends Container {
     }
 
     // ------------------------------------------------------------------ 逻辑
+
+    /** Shift+点击条目：整组/单个直接进玩家背包（Shift+左键=整组、Shift+右键=1个，MC 习惯）。 */
+    private ItemStack shiftToInventory(EntityPlayer p, int slotId, int amount) {
+        int entryIndex = getEntryIndexForSlot(slotId);
+        if (entryIndex >= 0 && entryIndex < storage.size()) {
+            if (!p.world.isRemote) {
+                withdrawToInventory(p, entryIndex, amount); // amount<0=整组, >0=指定数量
+            } else {
+                storage.withdraw(entryIndex, amount);
+                InfinitePackMod.LOG.info("[infpack] client SHIFT-WITHDRAW idx={} count={}", entryIndex, storage.getCount(entryIndex));
+            }
+        }
+        return ItemStack.EMPTY;
+    }
+
+    /** 取出到光标（slotClick 左/右键用）：计数减少，物品放到玩家光标上，多余掉落。 */
+    private void withdrawToCursor(EntityPlayer p, int entryIndex, int count) {
+        ItemStack out = storage.withdraw(entryIndex, count); // 计数减少（可负），返回样本
+        if (out == null || out.getCount() <= 0) {
+            return;
+        }
+        putOnCursor(p, out);
+        if (!p.world.isRemote) {
+            saveAndRefresh();
+            resyncToClient(p);
+            InfinitePackMod.LOG.info("[infpack] server WITHDRAW idx={} count={}", entryIndex, storage.getCount(entryIndex));
+        }
+    }
+
+    /** 把物品放到玩家光标上：空手=直接放；同变体未满=合并；否则掉落（取出要求空手，此处仅防御）。 */
+    private void putOnCursor(EntityPlayer p, ItemStack stack) {
+        if (stack == null || stack.getCount() <= 0) {
+            return;
+        }
+        ItemStack cur = p.inventory.getItemStack();
+        if (cur.isEmpty()) {
+            p.inventory.setItemStack(stack);
+        } else if (BackpackStorage.sameVariant(cur, stack) && cur.getCount() < cur.getMaxStackSize()) {
+            int space = cur.getMaxStackSize() - cur.getCount();
+            int move = Math.min(space, stack.getCount());
+            cur.setCount(cur.getCount() + move);
+            stack.setCount(stack.getCount() - move);
+            if (stack.getCount() > 0) {
+                dropItem(p, stack);
+            }
+        } else {
+            dropItem(p, stack);
+        }
+    }
 
     private void withdrawToInventory(EntityPlayer p, int entryIndex, int count) {
         ItemStack out = storage.withdraw(entryIndex, count); // 计数减少（可负），返回样本

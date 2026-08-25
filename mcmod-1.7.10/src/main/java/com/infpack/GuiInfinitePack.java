@@ -238,28 +238,31 @@ public class GuiInfinitePack extends GuiContainer {
         // 图标渲染在 z=100 且开启深度测试；这里关闭深度测试，让文本/高亮/遮罩覆盖在图标上层
         GL11.glDisable(GL11.GL_DEPTH_TEST);
         try {
-            // 每个有内容的条目槽右下角画计数（正=白，负/0=红；大数缩写+超宽缩小保证放得下）
+            // 每个有内容的条目槽右下角画计数（正=白，0/负=红；大数缩写+统一字号+右对齐）
             for (int i = 0; i < ContainerInfinitePack.ENTRY_VISIBLE; i++) {
                 Slot s = (Slot) this.inventorySlots.inventorySlots.get(i);
                 int idx = container.getEntryIndexForSlot(i);
                 if (s.getHasStack() && idx >= 0 && idx < container.getStorage().size()) {
                     int count = container.getStorage().getCount(idx);
                     String text = compactCount(count);
-                    int color = count >= 0 ? 0xFFFFFF : 0xFF4040;
+                    int color = count > 0 ? 0xFFFFFF : 0xFF4040; // 0 和负数都是红色
                     int textW = this.fontRendererObj.getStringWidth(text);
-                    int cx = guiLeft + s.xDisplayPosition + 17 - textW;
-                    int cy = guiTop + s.yDisplayPosition + 9;
-                    if (textW > 15) {
-                        // 文本比槽位宽：等比缩小字体放进格子
-                        float scale = 15.0f / textW;
-                        GL11.glPushMatrix();
-                        GL11.glTranslatef(cx, cy, 0.0f);
-                        GL11.glScalef(scale, scale, 1.0f);
-                        this.fontRendererObj.drawStringWithShadow(text, 0, 0, color);
-                        GL11.glPopMatrix();
-                    } else {
-                        this.fontRendererObj.drawStringWithShadow(text, cx, cy, color);
+                    // 统一字号：基础 0.85 倍（比原版略小，避免数字过大/占满格子）；
+                    // 仍超宽则等比缩小，保证放进格子。
+                    float scale = 0.85f;
+                    int availW = 11; // 槽内可用宽度（16px 槽，右缘内收 4px）
+                    if (textW * scale > availW) {
+                        scale = availW / (float) textW;
                     }
+                    // 右对齐：按缩放后的实际宽度定位，文本右缘贴右缘（右缘内收 4px，避免
+                    // 长数字溢出槽外；左侧限制保持不变）
+                    float cx = guiLeft + s.xDisplayPosition + 13 - textW * scale;
+                    float cy = guiTop + s.yDisplayPosition + 9;
+                    GL11.glPushMatrix();
+                    GL11.glTranslatef(cx, cy, 0.0f);
+                    GL11.glScalef(scale, scale, 1.0f);
+                    this.fontRendererObj.drawStringWithShadow(text, 0, 0, color);
+                    GL11.glPopMatrix();
                 }
             }
 
@@ -369,28 +372,36 @@ public class GuiInfinitePack extends GuiContainer {
         return null;
     }
 
-    /** 大数缩写：<1万 原样；<1亿 用万；否则用亿。负数前缀 "-"。 */
+    /** 大数缩写：<1000 原样；<100万 用 K；<10亿 用 M；否则用 G。负数前缀 "-"。 */
     private static String compactCount(int value) {
         if (value < 0) {
             return "-" + compactCount(-value);
         }
-        if (value < 10000) {
+        if (value < 1000) {
             return Integer.toString(value);
         }
-        if (value < 100000000) {
-            long wan = value / 10000L;
-            long dec = (value % 10000L) / 1000L;
-            if (dec == 0 || wan >= 100) {
-                return wan + "\u4e07"; // 万
+        if (value < 1000000) { // < 1,000,000 → K
+            long k = value / 1000L;
+            long dec = (value % 1000L) / 100L;
+            if (dec == 0 || k >= 100) {
+                return k + "K";
             }
-            return wan + "." + dec + "\u4e07";
+            return k + "." + dec + "K";
         }
-        long yi = value / 100000000L;
-        long dec = (value % 100000000L) / 10000000L;
-        if (dec == 0 || yi >= 100) {
-            return yi + "\u4ebf"; // 亿
+        if (value < 1000000000L) { // < 1,000,000,000 → M
+            long m = value / 1000000L;
+            long dec = (value % 1000000L) / 100000L;
+            if (dec == 0 || m >= 100) {
+                return m + "M";
+            }
+            return m + "." + dec + "M";
         }
-        return yi + "." + dec + "\u4ebf";
+        long g = value / 1000000000L;
+        long dec = (value % 1000000000L) / 100000000L;
+        if (dec == 0 || g >= 100) {
+            return g + "G";
+        }
+        return g + "." + dec + "G";
     }
 
     @Override
