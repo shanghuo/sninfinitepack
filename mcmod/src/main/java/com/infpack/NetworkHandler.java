@@ -23,5 +23,6 @@ public class NetworkHandler {
         NETWORK.registerMessage(MsgDisplayOrderHandler.class, MsgDisplayOrder.class, 0, Side.SERVER);
         NETWORK.registerMessage(MsgBackpackRequestHandler.class, MsgBackpackRequest.class, 1, Side.SERVER);
         NETWORK.registerMessage(MsgBackpackDataHandler.class, MsgBackpackData.class, 2, Side.CLIENT);
+        NETWORK.registerMessage(MsgForcedSurvivalDeniedHandler.class, MsgForcedSurvivalDenied.class, 3, Side.CLIENT);
     }
 }

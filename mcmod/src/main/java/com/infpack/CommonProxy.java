@@ -2,6 +2,7 @@ package com.infpack;
 
 import net.minecraft.item.ItemStack;
 
+import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
@@ -19,7 +20,10 @@ public class CommonProxy {
                 .setCreativeTab(InfinitePackMod.CREATIVE_TAB);
         GameRegistry.registerItem(InfinitePackMod.itemInfinitePack, "infinitePack");
         NetworkRegistry.INSTANCE.registerGuiHandler(InfinitePackMod.instance, new GuiHandler());
-        NetworkHandler.init(); // 显示顺序（排序/搜索）同步通道
+        NetworkHandler.init(); // 显示顺序（排序/搜索）同步通道 + 强制生存消息
+        // 强制生存：加载全局配置 + 注册服务器每 tick 检测
+        ForceSurvivalConfig.load(event.getModConfigurationDirectory());
+        FMLCommonHandler.instance().bus().register(new ForceSurvivalHandler());
     }
 
     public void init(FMLInitializationEvent event) {
@@ -34,6 +38,7 @@ public class CommonProxy {
 
     public void serverStarting(FMLServerStartingEvent event) {
         event.registerServerCommand(new CommandInfPackTest());
+        event.registerServerCommand(new CommandForceSurvival()); // 强制生存指令
     }
 
     /** 服务器停止：全量写回背包数据文件。 */

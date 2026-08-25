@@ -8,9 +8,9 @@
 
 Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）** 的模组：玩家把任意物品放入背包物品后，可**无限取出**（属性/附魔/耐久/NBT 与放入时完全一致）。现为**计数制**——放入 +N、取出 -N、可为负（负数=无限透支），让玩家感知用了多少。
 
-- MODID：`sninfinitepack`；显示名 `SN Infinite Pack`；版本 `1.0.1`（jar 名 `sninfinitepack-1.0.1.jar`）
+- MODID：`sninfinitepack`；显示名 `SN Infinite Pack`；版本 `1.0.2`（jar 名 `sninfinitepack-1.0.2.jar`）
 - 源码：`docker/mcmod/src/main/java/com/infpack/`
-- 成品：`docker/dist/sninfinitepack-1.0.1.jar`
+- 成品：`docker/dist/sninfinitepack-1.0.2.jar`
 - 语言：`assets/sninfinitepack/lang/{zh_CN,en_US}.lang`
 - 合成配方：8 泥土（矿辞 `dirt`）围一圈 + 中间 1 木头（矿辞 `logWood`）
 
@@ -109,9 +109,20 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）** 的模组
 - **根因**：时间戳原用 `world.getTotalWorldTime()`（tick 粒度 1/20s），同一 tick 内连续存取多个条目 → `lastAccess` 相同 → 稳定排序退化为插入顺序，无法反映最新操作（排序方向本身是对的：lastAccess 降序=最新在前）。
 - **修复**：`BackpackStorage.stamp()` 改用 `System.currentTimeMillis()` + 单调递增（同毫秒连续操作也严格递增）；删除 `accessClock` 字段与容器的 `stamp(player)` 调用（不再依赖 world tick；测试命令不设置时钟也能工作）。
 
+### 第 13 轮 — 强制生存指令（2026-08-25，版本 1.0.2）
+- **指令** `/snanginflock`：无参数 → 返回帮助 + 当前开启/关闭状态；`/snanginflock <密码> <enable|on|1|true>` 开启并设置密码（每次开启覆盖旧密码）；`/snanginflock <密码> <disable|off|0|false>` 关闭（校验密码，关闭后密码失效）。默认 OP 4 权限。
+- **全局配置**：`config/sninfinitepack-forcesurvival.properties`（`ForceSurvivalConfig`），存 enabled + SHA-256 密码哈希（非明文）+ `prevKeepInventory`（开启前死亡不掉落状态），对所有存档生效；忘密码删配置即可重置。
+- **死亡不掉落联动（按维度记录）**：开启 lock 自动开启 keepInventory（死亡不掉落）。**开启前状态按维度记录**（key=存档文件夹:维度ID，存 config `prevKeepInventory.<key>`）：lock 首次影响某维度时记录其开启前值并强制 true；lock 期间每秒保持所有已加载维度 true（玩家所在维度必加载，故任何维度死亡都不掉落）；关闭 lock 恢复各已加载维度到各自开启前状态，未加载维度的记录保留、加载后补恢复（跨存档/多维度均正确，避免"全局单值跨存档误还原"）。
+- **服务器每 tick**（`ForceSurvivalHandler`，`TickEvent.ServerTickEvent`，注册到 FMLCommonHandler bus）：
+  - 存档创建=创造 + 强制开启 → 向在线玩家发 `MsgForcedSurvivalDenied`（每秒去重），客户端显示全屏拦截。
+  - 存档创建=生存 + 强制开启 → 玩家 gameType==CREATIVE → `p.setGameType(SURVIVAL)` 改回（服务器权威，防绕过）。
+- **客户端全屏 GUI** `GuiForcedSurvivalDenied`：深色背景 + 「当前存档禁止游玩」+ 说明 + 「返回标题」按钮（无退出游戏）；`keyTyped` 全部拦截（Esc 无法关闭），只能返回标题。
+- **关键点**：1.7.10 Forge 无 `PlayerGameTypeChangeEvent` → 改用每 tick 检测（防绕过更彻底）；「创建模式」用 `WorldInfo.getGameType()` 近似（受 /defaultgamemode 影响）；单机为软约束（玩家可改存档/config 文件）。
+- 构建成功（jar 63177B），已部署测试实例，**验证中**。
+
 ---
 
-## 3. 当前现状（1.0.1 · 文件 NBT 存储版）
+## 3. 当前现状（1.0.2 · 文件 NBT 存储 + 强制生存）
 
 ### 已实现功能
 - **存入**：手拿物品点条目格（插到该格）/ Shift+玩家背包物品整组存入 → `count += 数量`。
@@ -133,11 +144,12 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）** 的模组
 - API：`load/save(ItemStack)`、`size/isEmpty`、`getSample/getCount/getLastAccess/getDisplayStack`、`deposit(stack, backpackItem, index)`、`withdraw(index, amount)`、`removeEntry`、`contains/indexOf`、`sameVariant`。
 - 显示用 `getDisplayStack` 返回 stackSize=1，数量由 GUI 画。
 
-### 1.0.1 新增（第 11/12 轮，验证中）
+### 新增功能（1.0.1 排序/搜索 + 1.0.2 强制生存）
 - **搜索框**：状态行左侧，按物品显示名（本地化）过滤，中文可用。
 - **排序切换**：状态行点击循环 默认/最近/数量升/数量降；非默认橙色高亮。
 - **显示顺序同步**：客户端算好 int[] 顺序发服务器，服务器 `getEntryIndexForSlot` 映射槽位→真实条目；排序/搜索下存取、删除、滚动均命中正确条目。
 - **UI 精简**：标题「无限背包」；搜索框 + 排序切换 + 页数右对齐；删除模式隐藏搜索框显示删除提示。
+- **强制生存（1.0.2）**：`/snanginflock <密码> <on|off>` 全局开关（启停支持 on/off、1/0、true/false）；创造创建的存档→客户端全屏「当前存档禁止游玩」（仅返回标题）；生存创建的存档→切创造自动改回生存；停用需密码正确，关闭后密码失效。
 
 ---
 
@@ -156,13 +168,13 @@ docker compose -f c:\project\mc\docker\compose.yaml up -d
 
 # 构建并复制到 dist
 docker exec mcmod-dev bash /scripts/build_release.sh
-# 产物：c:\project\mc\docker\dist\sninfinitepack-1.0.1.jar
+# 产物：c:\project\mc\docker\dist\sninfinitepack-1.0.2.jar
 ```
 
 ### 修改后必做
 1. 用 SRG/反编译源里的方法名（partial-MCP）。
 2. 构建成功后再安装。
-3. **先确认游戏已关闭**，再 `Copy-Item` 覆盖 `nw-mc-20251224-test\...\.minecraft\mods\sninfinitepack-1.0.1.jar`（并**移除旧的 `sninfinitepack-1.0.0.jar` / `infinitepack-*.jar`**——同 modid 冲突会双加载；校验 SHA256 与 dist 一致）。
+3. **先确认游戏已关闭**，再 `Copy-Item` 覆盖 `nw-mc-20251224-test\...\.minecraft\mods\sninfinitepack-1.0.2.jar`（并**移除旧版本 `sninfinitepack-*.jar` / `infinitepack-*.jar`**——同 modid 冲突会双加载；校验 SHA256 与 dist 一致）。
 4. 让用户重启游戏（或代启动）。
 
 ---
@@ -222,11 +234,11 @@ Start-Process "C:\project\mc\nw-mc-20251224-test\prismlauncher.exe" -ArgumentLis
 - [ ] `/infpacktest` 在真实服务器跑通。
 - [ ] 共享仓库 / 公会共享背包（全新设计，当前无）。
 - [ ] 创造模式禁止存入（可选，用户尚未决定）。
-- [ ] **强制生存指令**（可行性：可行，未实施；详见第 10 节）：一条指令两参数（密码 + 启停），对所有存档生效；创造创建的存档→拒绝游玩；生存创建的存档→切创造自动改回生存；停用需密码。
+- [x] **强制生存指令**（1.0.2 第 13 轮已实施，验证中；详见第 10 节）：一条指令两参数（密码 + 启停），对所有存档生效；创造创建的存档→拒绝游玩（客户端全屏拦截）；生存创建的存档→切创造自动改回生存；停用需密码。
 
 ---
 
-## 9. 1.0.1 计划（排序/搜索/UI 精简 + 海量存储均已实施，验证中）
+## 9. 1.0.1 计划（排序/搜索/UI 精简 + 海量存储：已全部实施完成）
 
 ### 9.1 目标功能（用户原话归纳）
 1. **顺序可切换排序**：`最近存取 / 数量升序 / 数量降序`（建议另保留 `默认=存入顺序` 作基态）。
@@ -268,7 +280,7 @@ Start-Process "C:\project\mc\nw-mc-20251224-test\prismlauncher.exe" -ArgumentLis
 
 ---
 
-## 10. 新需求评估：强制生存指令（可行性：可行，未实施）
+## 10. 新需求评估：强制生存指令（1.0.2 第 13 轮已实施，验证中）
 
 ### 10.1 需求（用户原话归纳）
 - 一条指令，两个参数：`pass`（密码）与启停（enable/disable）。启用时设置密码；对所有存档生效。
@@ -284,8 +296,8 @@ Start-Process "C:\project\mc\nw-mc-20251224-test\prismlauncher.exe" -ArgumentLis
 | 指令两参数 | `CommandBase`（同 `CommandInfPackTest`） | 低 |
 | 全局配置（所有存档生效） | 存 `config/sninfinitepack/` 文件（不随存档），含 `enabled + 密码` | 低 |
 | 识别存档创建模式 | `world.getWorldInfo().getGameType()`（level.dat GameType，创建时设定） | 中 |
-| 创造存档拒绝游玩 | 登录/世界加载时检查 → `kickPlayerFromServer`（单人回标题）或客户端全屏 GUI | 中 |
-| 生存存档切创造→改回 | Forge `PlayerGameTypeChangeEvent` + 每 tick 兜底检测 | 低 |
+| 创造存档拒绝游玩 | 服务器每 tick → 发 `MsgForcedSurvivalDenied`，客户端全屏 GUI 拦截（仅返回标题） | 中 |
+| 生存存档切创造→改回 | 每 tick 检测（1.7.10 无 `PlayerGameTypeChangeEvent`）→ `setGameType(SURVIVAL)` | 低 |
 
 ### 10.3 关键注意点 / 风险
 1. **「创建模式」是近似**：`WorldInfo.getGameType()` 是存档默认模式（创建时设定），但 `/defaultgamemode` 会改它 → 严格"创建时"需在首次进入时快照记录（可接受近似）。
@@ -294,9 +306,9 @@ Start-Process "C:\project\mc\nw-mc-20251224-test\prismlauncher.exe" -ArgumentLis
 4. **"全屏拦截"实现**：服务器 `PlayerLoggedInEvent`/世界加载检查创造存档 → kick 回标题并提示；若需真正的"全屏界面"则要客户端 GUI（较重，可后置）。
 5. 集成服务器（单人）踢出的玩家体验：回标题 + 明确提示。
 
-### 10.4 建议实施步骤（后续做时）
-1. `ForceSurvivalConfig`：config 文件存 enabled/密码哈希。
-2. `CommandForceSurvival`：`/infpackforesurv <pass> <enable|disable>`（校验密码、设置/停用）。
-3. `PlayerGameTypeChangeEvent` 监听：生存存档 + 强制生存 + 变创造 → 改回生存；每 tick 兜底防绕过。
-4. 世界加载/玩家登录检查：创造存档 + 强制生存 → 拒绝进入（kick + 提示）。
-5. 可选：客户端全屏拦截 GUI（后置）。
+### 10.4 实施要点（1.0.2 第 13 轮已实施）
+1. `ForceSurvivalConfig`：config 文件存 enabled/密码哈希（SHA-256，非明文）。
+2. `CommandForceSurvival`：`/snanginflock <pass> <enable|on|1|true|disable|off|0|false>`（校验密码、设置/停用；无参返回帮助+状态）。
+3. 每 tick 检测（1.7.10 无 `PlayerGameTypeChangeEvent`）：生存存档 + 强制生存 + 变创造 → 改回生存；防绕过。
+4. 每 tick：创造存档 + 强制生存 → 发 `MsgForcedSurvivalDenied`，客户端全屏拦截（仅返回标题）。
+5. 客户端全屏拦截 GUI（`GuiForcedSurvivalDenied`）：已实现（仅返回标题，无退出游戏）。

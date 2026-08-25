@@ -1,2 +1,2 @@
 // 自定义版本号（不使用 git tag 版本管理，保持构建可复现）
-project.ext.modVersion = "1.0.1"
+project.ext.modVersion = "1.0.2"
