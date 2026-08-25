@@ -13,6 +13,7 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）** 的模组
 - 成品：`docker/dist/sninfinitepack-1.0.2.jar`
 - 语言：`assets/sninfinitepack/lang/{zh_CN,en_US}.lang`
 - 合成配方：8 泥土（矿辞 `dirt`）围一圈 + 中间 1 木头（矿辞 `logWood`）
+- **兼容性（完整核查结论，2026-08-25）**：只依赖 Minecraft 1.7.10 原版 + Forge(FML) 核心 API（import 无任何第三方模组包；`dependencies.gradle` 无运行时依赖——NEI 行已注释；`mcmod.info` requiredMods/dependencies 全空；GTNHGradle 仅为构建插件不进产物）。**与标准 Forge 1.7.10 原版/基础模组环境理论兼容**，不依赖 GTNH 特有内容；已在 GTNH 2.8.4 实机验证，其它环境未实机验证。不覆盖任何原版/模组内容（注册名带 modid、配方矿辞叠加、通道名全局唯一）。
 
 ---
 
@@ -208,7 +209,7 @@ Start-Process "C:\project\mc\nw-mc-20251224-test\prismlauncher.exe" -ArgumentLis
 ## 6. 部署到真实服务器（用户决策，未执行）
 
 - 同一份 jar 放入服务器 `mods/`；**服务端存储逻辑权威，服务端必须装**；客户端也装同 jar。
-- 数据跟随背包物品 NBT 持久化，无需额外数据库。
+- 数据存服务器 `world/data/sninfinitepack/<uuid>.nbt`（物品 NBT 只存 uuid），无需额外数据库。
 - 当前为**按物品独立**（一人一包各存各的），**无共享仓库设计**。
 - GTNH 服务器端部署曾被尝试但受阻（GTNH 自定义 Forge 校验问题 / 标准 Forge 1.7.10 universal 已从 maven 移除 / ServerPack 直链未找到），已搁置待用户提供 ServerPack 或允许装。
 
