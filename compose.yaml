@@ -1,4 +1,4 @@
-# MC 模组开发环境 —— 仅用于开发 mcmod（新容器，不影响现有容器）
+# MC 模组开发环境 —— 仅用于开发模组（新容器，不影响现有容器）
 services:
   dev:
     build:
@@ -8,7 +8,7 @@ services:
     image: mcmod-dev:latest
     container_name: mcmod-dev
     restart: "no"
-    working_dir: /work/mcmod
+    working_dir: /work/mcmod-1.7.10
     environment:
       HTTP_PROXY: http://PROXY_HOST:7890
       HTTPS_PROXY: http://PROXY_HOST:7890
@@ -17,7 +17,8 @@ services:
       JAVA8_HOME: /opt/jdk8
       GRADLE_USER_HOME: /root/.gradle
     volumes:
-      - ./mcmod:/work/mcmod          # 模组源码（宿主可见/可编辑）
+      - ./mcmod-1.7.10:/work/mcmod-1.7.10   # 1.7.10 模组工程（宿主可见/可编辑）
+      - ./mcmod-1.12.2:/work/mcmod-1.12.2   # 1.12.2 模组工程（多版本支持）
       - ./dist:/work/dist            # 构建产物输出
       - ./test:/work/test            # 测试服务器数据（从实例复制）
       - ./scripts:/scripts           # 辅助脚本（bash 脚本，LF 行尾）

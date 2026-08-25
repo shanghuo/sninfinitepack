@@ -6,14 +6,14 @@
 
 ## 1. 项目一句话概述
 
-Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）** 的模组：玩家把任意物品放入背包物品后，可**无限取出**（属性/附魔/耐久/NBT 与放入时完全一致）。现为**计数制**——放入 +N、取出 -N、可为负（负数=无限透支），让玩家感知用了多少。
+Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）+ 1.12.2 / Forge 14.23.5.2864（HMCL 实测环境）** 的模组：玩家把任意物品放入背包物品后，可**无限取出**（属性/附魔/耐久/NBT 与放入时完全一致）。现为**计数制**——放入 +N、取出 -N、可为负（负数=无限透支），让玩家感知用了多少。
 
-- MODID：`sninfinitepack`；显示名 `SN Infinite Pack`；版本 `1.0.2`（jar 名 `sninfinitepack-1.0.2.jar`）
-- 源码：`docker/mcmod/src/main/java/com/infpack/`
-- 成品：`docker/dist/sninfinitepack-1.0.2.jar`
+- MODID：`sninfinitepack`；显示名 `SN Infinite Pack`；版本 `1.0.2`（**双版本 jar 命名带 mc 后缀**）
+- 源码：`docker/mcmod-1.7.10/src/main/java/com/infpack/`（1.7.10 版）；`docker/mcmod-1.12.2/src/main/java/com/infpack/`（1.12.2 版）
+- 成品：`docker/dist/sninfinitepack-1.0.2-mc1.7.10.jar`、`docker/dist/sninfinitepack-1.0.2-mc1.12.2.jar`（另有 -dev/-sources 同带 mc 后缀）
 - 语言：`assets/sninfinitepack/lang/{zh_CN,en_US}.lang`
 - 合成配方：8 泥土（矿辞 `dirt`）围一圈 + 中间 1 木头（矿辞 `logWood`）
-- **兼容性（完整核查结论，2026-08-25）**：只依赖 Minecraft 1.7.10 原版 + Forge(FML) 核心 API（import 无任何第三方模组包；`dependencies.gradle` 无运行时依赖——NEI 行已注释；`mcmod.info` requiredMods/dependencies 全空；GTNHGradle 仅为构建插件不进产物）。**与标准 Forge 1.7.10 原版/基础模组环境理论兼容**，不依赖 GTNH 特有内容；已在 GTNH 2.8.4 实机验证，其它环境未实机验证。不覆盖任何原版/模组内容（注册名带 modid、配方矿辞叠加、通道名全局唯一）。
+- **兼容性（完整核查结论，2026-08-25）**：两个版本都只依赖 MC 原版 + Forge(FML) 核心 API（import 无任何第三方模组包；无运行时依赖；`mcmod.info` requiredMods/dependencies 全空；GTNHGradle/RFG 仅为构建插件不进产物）。**与标准 Forge 1.7.10 / 1.12.2 原版及基础模组环境兼容**，不依赖 GTNH 特有内容；1.7.10 已在 GTNH 2.8.4 实机验证，1.12.2 已在 HMCL Forge 14.23.5.2864 实机验证。不覆盖任何原版/模组内容（注册名带 modid、配方矿辞叠加、通道名全局唯一）。
 
 ---
 
@@ -26,7 +26,7 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）** 的模组
   - 网络代理 `http://PROXY_HOST:7890`（HTTP_PROXY/HTTPS_PROXY）。**网络故障由用户处理，不改源**。
   - **绝不动真实实例** `nw-mc-20251224`（用户正在玩）；复制整份到 `nw-mc-20251224-test` 用于测试。
 - **实现**：`BackpackStorage`（NBT 精确匹配）、`NbtUtil`（深度 NBT 等价）、`ContainerInfinitePack`、`GuiInfinitePack`、`SlotInfiniteEntry`、`ItemInfinitePack`、`GuiHandler`、`CommonProxy`、`ClientProxy`。
-- **关键坑**：本构建 classpath 是 **partial-MCP**，很多方法名是 **SRG（`func_*`）**。直接用 RFG 反编译源码 `docker/mcmod/build/rfg/minecraft-src/java/` 里的名字写，编译和运行都对（reobf 后无 MCP 残留）。
+- **关键坑**：本构建 classpath 是 **partial-MCP**，很多方法名是 **SRG（`func_*`）**。直接用 RFG 反编译源码 `docker/mcmod-1.7.10/build/rfg/minecraft-src/java/` 里的名字写，编译和运行都对（reobf 后无 MCP 残留）。
 - **UI 决策（用户拍板）**：像箱子一样点击存入；**无丢弃槽、无提示文字行**；条目区 6 行（9×6=54 格）。
 
 ### 第 2 轮 — Bug：条目数增加但格子不显示
@@ -77,7 +77,7 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）** 的模组
 - 命名澄清：**游戏内物品名/GUI 标题/创造标签都不加 SN**（仍是「得一即无限背包 / Infinite Pack」）；**模组名 `SN Infinite Pack` 与 modid `sninfinitepack` 保留**（只在模组列表/FML 日志可见，不影响游戏内 UI）。
 - 代码彩蛋：`InfinitePackMod.SN_FULL_NAME = "snang"`（SN 全称，仅代码可见；已验证编译进 jar 的 `InfinitePackMod.class`，不丢）。
 - 状态行整体上移 3px：`drawGuiContainerForegroundLayer` 的 y=131→128（约 0.3 字符高度）。
-- **git 初始化并首次提交**：`c:\project\mc\docker` 建仓，分支 `main`，commit `101938c`。`.gitignore` 排除 `mcmod/build|.gradle|run|out`、`test/`；`dist/` 入库（仅 sninfinitepack jar；已清掉 `build/libs` 里旧 infinitepack jar，防每次构建再复制进 dist）。
+- **git 初始化并首次提交**：`c:\project\mc\docker` 建仓，分支 `main`，commit `101938c`。`.gitignore` 排除 `build|.gradle|run|out`、`test/`；`dist/` 入库（仅 sninfinitepack jar；已清掉 `build/libs` 里旧 infinitepack jar，防每次构建再复制进 dist）。
 - **1.0.1 立项**（用户确认，本轮不做）：排序可切换 + 搜索 + UI 精简 + 海量存储改造。详见「第 9 节 1.0.1 计划」。
 
 ### 第 11 轮 — 排序 + 搜索 + UI 精简（2026-08-25，版本 1.0.1）
@@ -121,6 +121,67 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）** 的模组
 - **关键点**：1.7.10 Forge 无 `PlayerGameTypeChangeEvent` → 改用每 tick 检测（防绕过更彻底）；「创建模式」用 `WorldInfo.getGameType()` 近似（受 /defaultgamemode 影响）；单机为软约束（玩家可改存档/config 文件）。
 - 构建成功（jar 63177B），已部署测试实例，**验证中**。
 
+### 第 14 轮 — 多版本架构改造（1.7.10 + 1.12.2，2026-08-25）
+- **用户需求**：0 依赖模组（避免与玩家装的模组/整合包冲突）+ 多版本开发（先 1.7.10 同时支持 1.12.2，未来可加更多版本）。
+- **0 依赖确认**：`sninfinitepack-1.0.2.jar` 解包检查——除 `com/infpack/`、`META-INF/MANIFEST.MF`、`assets/`、`mcmod.info` 外**无任何第三方/GTNH 类**；GTNHGradle/RFG 只是构建工具链，不进产物。运行时只依赖 MC + Forge 核心。
+- **架构决策（推荐并采纳）**：**每版本独立 Gradle 工程 + 共享构建脚本**，不抽 common（本 mod 规模小，25 个类全版本耦合，抽公共层性价比低；用双工程 + 统一命名替代）：
+  - `docker/mcmod-1.7.10/`（GTNHGradle 2.0.20，1.7.10）
+  - `docker/mcmod-1.12.2/`（裸 RetroFuturaGradle 2.0.3，1.12.2）
+  - 两个工程同一容器 `mcmod-dev` 构建（Gradle 9.3.1 + JDK25；1.7.10 用 jabel→J8，1.12.2 用 Java 8 toolchain）。
+- **目录重命名**：`docker/mcmod` → `docker/mcmod-1.7.10`（Move-Item，未动 git index）；`compose.yaml` 容器内路径统一 `/work/mcmod-1.7.10` + `/work/mcmod-1.12.2`。
+- **产物命名**：dist 按 MC 版本隔离——`sninfinitepack-1.0.2-mc1.7.10.jar`、`sninfinitepack-1.0.2-mc1.12.2.jar`（dev/sources 也带 mc 后缀）；脚本 `build_release_1.7.10.sh`（1.7.10）+ `build_release_1.12.2.sh`（1.12.2），与工程目录/jar 命名完全对称。
+- **1.7.10 构建回归通过**（重命名 + compose 改动后 BUILD SUCCESSFUL，产物 SHA256 与改动前一致）。
+- **1.12.2 关键配置（RFG 2.0.3）**：`minecraft { mcVersion.set("1.12.2") }` → 自动 MCP stable_39 + Forge 1.12.2-14.23.5.2847；`injectedTags.put("VERSION", version)` 生成 `Tags.VERSION`；下载 vanilla/forge 偶发 Read timed out → `--max-workers 2` 解决（网络仍由用户负责）。
+
+### 第 15 轮 — 1.12.2 API 适配 + Java8 字节码 + 模型大小写（2026-08-25）
+- **API 适配（1.7.10 → 1.12.2 主要差异，已全部落地）**：
+  - FML 包 `cpw.mods.fml` → `net.minecraftforge.fml`；`@Mod`/`@SidedProxy`/事件类同。
+  - 物品注册：`GameRegistry.register(item)`（1.12.2 已移除）→ `ForgeRegistries.ITEMS.register(item.setRegistryName(...))`；`ForgeRegistries` 在 **`net.minecraftforge.fml.common.registry`** 包（非 `net.minecraftforge.registries`）。
+  - 配方：`GameRegistry.addRecipe`（已移除）→ `ForgeRegistries.RECIPES.register(new ShapedOreRecipe(new ResourceLocation(group), result, ...).setRegistryName(...))`（矿辞配方同 1.7.10）。
+  - Item：`onItemRightClick(World,EntityPlayer,EnumHand)` 返回 `ActionResult<ItemStack>`；无 IIcon（改模型 JSON）；`setUnlocalizedName` → `setTranslationKey`；`CreativeTabs.getTabIconItem` → `createIcon()` 返回 ItemStack。
+  - Container：`slotClick(int,int,ClickType,EntityPlayer)`（第 3 参 ClickType）；`crafters/ICrafting/sendProgressBarUpdate` → `listeners/IContainerListener/sendWindowProperty`；`sendContainerAndContentsToPlayer` 已移除 → 逐槽 `SPacketSetSlot` resync；IInventory 新增 `getName/getDisplayName/hasCustomName/isUsableByPlayer/removeStackFromSlot/getField/setField/getFieldCount/isEmpty/clear`，删除 `getInventoryName/hasCustomInventoryName/isUseableByPlayer/getStackInSlotOnClosing`。
+  - GUI：`fontRendererObj` → `fontRenderer`；`drawGuiContainerForegroundLayer(int,int)`（2 参，无 float）；`GuiTextField(int id, FontRenderer, ...)` 带 id 参数；`mouseClicked/keyTyped/handleMouseInput` 声明 `throws IOException`；`Slot.xDisplayPosition/yDisplayPosition` → `xPos/yPos`。
+  - 命令：`getCommandName/getCommandUsage/addChatMessage/ChatComponentText` → `getName/getUsage/sendMessage/TextComponentString`；`execute(MinecraftServer,...)`；`getPlayer` 抛 `CommandException` 需捕获。
+  - 服务器：`MinecraftServer.getServer()` 1.12.2 非静态 → `FMLCommonHandler.instance().getMinecraftServerInstance()`；`getConfigurationManager().playerEntityList/worldServers` → `getPlayerList().getPlayers()/worlds`；`WorldSettings.GameType` → 独立类 `net.minecraft.world.GameType`；`getSaveHandler().getWorldDirectory()`（1.12.2 仍是 getWorldDirectory 非 getWorldFolder）；`w.provider.getDimension()`。
+  - 网络：包变；`Minecraft.func_152344_a` → `addScheduledTask`；`PacketBuffer.readString/readVarInt/readCompoundTag`（readCompoundTag 抛 IOException 需捕获，writeCompoundTag 不抛）。
+  - 注册名：`Item.REGISTRY.getKey` 不存在 → `item.getRegistryName()`；反查用 `Item.REGISTRY.getObject(new ResourceLocation(name))`。
+  - 附魔：1.12.2 `Enchantment` 无静态字段（SHARPNESS 等）→ `Enchantment.getEnchantmentByLocation("sharpness")`。
+- **关键坑 1（Java 字节码版本）**：RFG 默认只对其内部任务用 Java 8，主 `compileJava` 用 JDK25 → 产出 **Java 25 字节码（major 69）**，1.12.2 FML 的 ASM 5.2 只支持到 52 → mod 被 FML 报 "corrupt zip" 忽略。**必须 `java { toolchain { languageVersion.set(JavaLanguageVersion.of(8)) } }`**（容器 JAVA8_HOME=/opt/jdk8）→ major 52，正常加载。
+- **关键坑 2（模型路径大小写）**：1.12.2 `ResourceLocation` 把路径**小写化**（`infinitePack` → `infinitepack`）。模型文件、纹理、模型 JSON `layer0`、`ModelResourceLocation`、注册名全部要用**全小写 `infinitepack`**（lang 键 `item.infinitePack.name` 基于 unlocalized name 不受影响）。
+- **关键坑 3（IInventory 空槽必须返回 ItemStack.EMPTY，不能 null）**：1.12.2 的 `Container.detectAndSendChanges` / `openGui→addListener→sendAllContents` 会遍历槽位并调用 `ItemStack.copy()`，空槽返回 `null` 会 NPE 崩溃（`Ticking player` + `FMLNetworkHandler.openGui` NPE）。`EntriesInventory.getStackInSlot/decrStackSize/removeStackFromSlot` 空态一律返回 `ItemStack.EMPTY`（1.7.10 允许 null，1.12.2 不允许）。
+- **关键坑 4（ItemStack 空值语义：EMPTY ≠ null）**：1.12.2 光标/槽位空值是 `ItemStack.EMPTY` 而非 `null`。沿袭 1.7.10 的 `== null` / `!= null` 判断会全失效（`EMPTY` 非 null → `cursor != null` 恒 true → 空手误走"存入"分支），且 `setItemStack(null)`/`putStack(null)`/`setInventorySlotContents(null)` 会污染客户端光标为 null → 崩溃。**修复**：所有光标/槽位判断改 `isEmpty()`/`!isEmpty()`，设空一律 `ItemStack.EMPTY`。
+- **关键坑 5（slotClick 不能返回 null）**：1.12.2 客户端 `PlayerControllerMP.windowClick` 会把本地 `slotClick` 的**返回值**作为 `CPacketClickWindow` 内容构造（`new CPacketClickWindow(..., itemstack)` → `itemstack.copy()`），`slotClick`/`transferStackInSlot` 返回 `null` 会 NPE 崩溃（`CPacketClickWindow.<init>` NPE）。**全部 `return null` 改为 `return ItemStack.EMPTY`**（findBackpack 等内部查找方法的 null 除外）。
+- **实机验证（2026-08-25 最终通过）**：HMCL 实例 `1.12.2-Forge`（Forge 14.23.5.2864）加载成功——`Forge Mod Loader has successfully loaded 5 mods`（含 sninfinitepack），资源包 `SN Infinite Pack` 正常加载，**模型加载无报错**（全小写修复生效），正常进入世界。
+- **1.12.2 测试注意**：用 `Start-Process HMCL --launch` 命令行启动不稳定（HMCL 多实例时可能不响应）；需先**杀干净所有 javaw/java 进程**再干净启动，或直接在 HMCL GUI 手动点启动。游戏进程是 `jre1.8.0_251\bin\java.exe ... net.minecraft.launchwrapper.Launch`（Java 8）。
+
+### 第 16 轮 — 全面 API 审查 + 远程修复（2026-08-25，用户远程）
+- 用户远程无法实测，要求"完整排查一遍 API，不要试一下崩一下"。子代理逐文件审查 25 个类 + 人工交叉验证，修复如下：
+- **崩溃级**：
+  - **副手持背包右键 → 服务器 NPE**：`findBackpack` 原只扫 `getSizeInventory()`（1.12.2 只含 mainInventory 36 格，不含副手/盔甲）；副手持背包时 `backpack==null` → `ensureUuid(null)` NPE。修复：`findBackpack` 扫 `mainInventory + offHandInventory + armorInventory`；`ensureUuid` 开头加 `backpack==null → return null` 兜底。
+  - **`SlotInfiniteEntry.decrStackSize` 返回 null** → 改 `ItemStack.EMPTY`（槽位契约，漏网）。
+- **功能级**：
+  - **Q 键(THROW)/双击(PICKUP_ALL) 在条目槽会误取出整组**：`slotClick` 显式忽略 `THROW`/`PICKUP_ALL`（返回 EMPTY）。
+  - **删除模式带光标点条目会误存入**：删除模式优先（光标非空时忽略该格，不存入不删除）。
+  - **`/infpacktest` 权限**：删除 `checkPermission=true` 重写，恢复默认 OP 4（避免非 OP 清空玩家背包）。
+  - **服务器消息 handler 未切主线程**：`MsgBackpackRequestHandler`/`MsgDisplayOrderHandler` 用 `player.getServer().addScheduledTask` 切服务器主线程（避免与主线程并发访问 ArrayList）。
+
+### 第 17 轮 — 物品栏图标问题诊断（2026-08-25，结论见第 18 轮）
+- **静态审查结论**：注册名 `sninfinitepack:infinitepack`（全小写）、`ModelLoader.setCustomModelResourceLocation(item,0,"...#inventory")`、模型 `models/item/infinitepack.json`（layer0 `sninfinitepack:items/infinitepack`）、纹理 `textures/items/infinitepack.png`（16x16 RGBA 有效）全部一致；日志无模型/纹理错误；1.12.2 还有自动 fallback（物品 registry name 对应 `models/item/*.json`）。**链路静态验证无问题**。
+- 已加 **ClientProxy 模型注册诊断日志**（`[infpack] ClientProxy 模型注册成功: registry=... model=...#inventory` / 失败 warn）。**下次实测时据此判断**：日志出现=模型注册执行（问题在别处，需用户反馈图标具体形态）；日志不出现=ClientProxy 未被使用（@SidedProxy 异常）。
+- 全部修复已构建部署到 HMCL（67234B），**未开游戏**（等用户回来手动启动）。
+
+### 第 18 轮 — 图标紫黑根因定位并修复（2026-08-25，用户实测）
+- **用户实测**：除图标外其余功能全部正常（存入/取出/删除/强制生存都工作）；图标**紫黑方块**，Q 丢出是**紫黑正方体** = **missing model**（默认缺失模型是立方体），不是纹理缺失。
+- **日志时序铁证**（latest.log）：
+  ```
+  [17:36:20] Reloading ResourceManager ... SN Infinite Pack
+  [17:36:25] Created: 512x512 textures-atlas            ← 模型烘焙
+  [17:36:26] [infpack] ClientProxy 模型注册成功 ...     ← 模型登记在烘焙【之后】
+  ```
+- **根因**：1.12.2 启动时序为 `preInit → 资源加载/模型烘焙 → init`。原代码在 **`init()`** 里调 `ModelLoader.setCustomModelResourceLocation` → ModelBakery 已收集完物品变体 → 物品落到 missing model（紫黑立方体）且**不报任何错误**（所以日志干净）。
+- **修复**：把模型登记从 `ClientProxy.init()` **移到 `preInit()`**（`super.preInit` 注册物品之后），这是 1.12.2 标准做法。字节码已验证：新 jar 的 preInit 含 `setCustomModelResourceLocation("sninfinitepack:infinitepack","inventory")`，init 已清空。
+- **部署状态（已部署 2026-08-25 17:46）**：用户关闭游戏后已替换 HMCL mods 里的 jar（`sninfinitepack-1.0.2-mc1.12.2.jar`，67236B）。下次进游戏应看到图标正常（若仍异常，看日志里 `ClientProxy 模型注册成功` 是否在 `Created: textures-atlas` 之前出现）。
+
 ---
 
 ## 3. 当前现状（1.0.2 · 文件 NBT 存储 + 强制生存）
@@ -158,8 +219,9 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）** 的模组
 
 ### 目录结构（c:\project\mc）
 - `nw-mc-20251224/` — **真实实例，用户正在玩，禁止修改/装 mod**（未装 infinitepack）。
-- `nw-mc-20251224-test/` — **测试完整拷贝**，已装 infinitepack，内存 Min=1024/Max=4096。
-- `docker/` — 开发环境：`mcmod/` 源码工程、`dist/` 成品、`scripts/` 脚本、`compose.yaml`、`build/rfg/` 反编译源。
+- `nw-mc-20251224-test/` — **1.7.10 测试完整拷贝**，已装 infinitepack，内存 Min=1024/Max=4096。
+- `hmcl/` — **1.12.2 测试实例**（HMCL 启动器 + `.minecraft/versions/1.12.2-Forge/`，Forge 14.23.5.2864，mods 已装 sninfinitepack）。
+- `docker/` — 开发环境：`mcmod-1.7.10/`（1.7.10）+ `mcmod-1.12.2/`（1.12.2）两个版本源码工程、`dist/` 成品、`scripts/` 脚本、`compose.yaml`、`mcmod-1.7.10/build/rfg/` 反编译源。
 - 容器：`mcmod-dev`（构建）、`storage-dev`、`deepseekai-dsh`、`builder` —— **只可启动/停止，不要删除后三者**。
 
 ### 构建命令
@@ -167,15 +229,22 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）** 的模组
 # 启动开发容器（若 mcmod-dev 未运行）
 docker compose -f c:\project\mc\docker\compose.yaml up -d
 
-# 构建并复制到 dist
-docker exec mcmod-dev bash /scripts/build_release.sh
-# 产物：c:\project\mc\docker\dist\sninfinitepack-1.0.2.jar
+# 构建 1.7.10 并复制到 dist（jar 带 -mc1.7.10 后缀）
+docker exec mcmod-dev bash /scripts/build_release_1.7.10.sh
+# 产物：c:\project\mc\docker\dist\sninfinitepack-1.0.2-mc1.7.10.jar
+
+# 构建 1.12.2 并复制到 dist（jar 带 -mc1.12.2 后缀）
+docker exec mcmod-dev bash /scripts/build_release_1.12.2.sh
+# 产物：c:\project\mc\docker\dist\sninfinitepack-1.0.2-mc1.12.2.jar
 ```
 
 ### 修改后必做
-1. 用 SRG/反编译源里的方法名（partial-MCP）。
+1. 用 SRG/反编译源里的方法名（1.7.10 partial-MCP；1.12.2 是 MCP 名，反编译源在各自 `build/rfg/minecraft-src/`）。
 2. 构建成功后再安装。
-3. **先确认游戏已关闭**，再 `Copy-Item` 覆盖 `nw-mc-20251224-test\...\.minecraft\mods\sninfinitepack-1.0.2.jar`（并**移除旧版本 `sninfinitepack-*.jar` / `infinitepack-*.jar`**——同 modid 冲突会双加载；校验 SHA256 与 dist 一致）。
+3. **先确认游戏已关闭**，再 `Copy-Item` 覆盖对应实例 mods 目录：
+   - 1.7.10 → `nw-mc-20251224-test\...\.minecraft\mods\sninfinitepack-1.0.2-mc1.7.10.jar`
+   - 1.12.2 → `hmcl\.minecraft\versions\1.12.2-Forge\mods\sninfinitepack-1.0.2-mc1.12.2.jar`
+   - 并**移除旧版本 `sninfinitepack-*.jar` / `infinitepack-*.jar`**（同 modid 冲突会双加载）；校验 SHA256 与 dist 一致。
 4. 让用户重启游戏（或代启动）。
 
 ---
@@ -184,10 +253,15 @@ docker exec mcmod-dev bash /scripts/build_release.sh
 
 ### 启动测试实例
 ```powershell
+# 1.7.10（GTNH/Prism）
 Start-Process "C:\project\mc\nw-mc-20251224-test\prismlauncher.exe" -ArgumentList "--launch","GT_New_Horizons_2.8.4_Java_17-25"
+# 账号：`test`（离线账号，Prism GUI 创建）。
+
+# 1.12.2（HMCL）
+Start-Process "C:\project\mc\hmcl\HMCL-3.16.3.exe" -ArgumentList "--launch","1.12.2-Forge"
 ```
-- 账号：`test`（离线账号，Prism GUI 创建）。
-- 开单人世界（创造模式方便测试），合成 8泥土+1木头 或创造拿背包。
+- 两个版本都开单人世界（创造模式方便测试），合成 8泥土+1木头 或创造拿背包。
+- ⚠️ 用 `Start-Process` 启动 HMCL 后终端可能被游戏进程阻塞，后续命令用 `mode=async` 或先结束 java 进程。
 
 ### 验收清单
 1. 背包显示名正常（非 `item.inf...`）。
@@ -199,9 +273,10 @@ Start-Process "C:\project\mc\nw-mc-20251224-test\prismlauncher.exe" -ArgumentLis
 7. 合成 8泥土+1木头 → 得到背包。
 
 ### 日志（重要）
-- **`InfinitePackMod.LOG`（`[infpack]` 前缀）写到 `fml-client-latest.log`，不是 `latest.log`！**
-- 路径：`nw-mc-20251224-test\instances\GT_New_Horizons_2.8.4_Java_17-25\.minecraft\logs\fml-client-latest.log`
-- 崩溃报告：同目录 `crash-reports\`。
+- **`InfinitePackMod.LOG`（`[infpack]` 前缀）写到 `fml-client-latest.log`，不是 `latest.log`！**（1.7.10 GTNH）
+- 1.7.10 路径：`nw-mc-20251224-test\instances\GT_New_Horizons_2.8.4_Java_17-25\.minecraft\logs\fml-client-latest.log`
+- **1.12.2 路径：`hmcl\.minecraft\versions\1.12.2-Forge\logs\latest.log`**（1.12.2 写 latest.log，mod 加载/`[infpack]` 日志在此；用 `Select-String` 搜 `infpack`/`sninfinitepack`）。
+- 崩溃报告：各自 `crash-reports\`。
 - 服务器逻辑在单机里也跑在同一 JVM，日志同文件（线程前缀区分 `Server thread`/`Client thread`）。
 
 ---
@@ -230,12 +305,12 @@ Start-Process "C:\project\mc\nw-mc-20251224-test\prismlauncher.exe" -ArgumentLis
 ## 8. 待办 / 可选方向
 
 - [x] **1.0.1：排序切换 + 搜索 + UI 精简**（第 11 轮已完成，见第 9 节）。
-- [x] **1.0.1：海量存储改造（方案 A 文件 NBT）**（第 12 轮已完成，验证中）。
+- [x] **1.0.1：海量存储改造（方案 A 文件 NBT）**（第 12 轮已完成；1.7.10 与 1.12.2 实机存取/排序/搜索均正常）。
 - [ ] 真实服务器部署（等待用户决策/提供 ServerPack）。
 - [ ] `/infpacktest` 在真实服务器跑通。
 - [ ] 共享仓库 / 公会共享背包（全新设计，当前无）。
 - [ ] 创造模式禁止存入（可选，用户尚未决定）。
-- [x] **强制生存指令**（1.0.2 第 13 轮已实施，验证中；详见第 10 节）：一条指令两参数（密码 + 启停），对所有存档生效；创造创建的存档→拒绝游玩（客户端全屏拦截）；生存创建的存档→切创造自动改回生存；停用需密码。
+- [x] **强制生存指令**（1.0.2 第 13 轮已实施；1.7.10 与 1.12.2 实机验证正常，详见第 10 节）：一条指令两参数（密码 + 启停），对所有存档生效；创造创建的存档→拒绝游玩（客户端全屏拦截）；生存创建的存档→切创造自动改回生存；停用需密码。
 
 ---
 
