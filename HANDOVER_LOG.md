@@ -8,9 +8,9 @@
 
 Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）** 的模组：玩家把任意物品放入背包物品后，可**无限取出**（属性/附魔/耐久/NBT 与放入时完全一致）。现为**计数制**——放入 +N、取出 -N、可为负（负数=无限透支），让玩家感知用了多少。
 
-- MODID：`sninfinitepack`；显示名 `SN Infinite Pack`；版本 `1.0.0`（jar 名 `sninfinitepack-1.0.0.jar`）
+- MODID：`sninfinitepack`；显示名 `SN Infinite Pack`；版本 `1.0.1`（jar 名 `sninfinitepack-1.0.1.jar`）
 - 源码：`docker/mcmod/src/main/java/com/infpack/`
-- 成品：`docker/dist/sninfinitepack-1.0.0.jar`
+- 成品：`docker/dist/sninfinitepack-1.0.1.jar`
 - 语言：`assets/sninfinitepack/lang/{zh_CN,en_US}.lang`
 - 合成配方：8 泥土（矿辞 `dirt`）围一圈 + 中间 1 木头（矿辞 `logWood`）
 
@@ -32,7 +32,7 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）** 的模组
 - 现象：放入后计数增加，但 54 个条目格空白。
 - 排查：追踪 FML 客户端 GUI 打开流程（`FMLNetworkHandler.openGui` → `OpenGuiHandler` → `GuiContainer.initGui`）。**结论：`GuiContainer.initGui()` 会把客户端 `player.openContainer` 设成 GUI 容器并拿对 windowId**，同步本应可用。
 - 实测日志（`fml-client-latest.log`）：**服务器端存入/删除全正常，但客户端 `reloadFromBackpack()` 从不触发** → 客户端 storage 一直是打开时的空状态。
-- **决策（v1.1.0）**：客户端显示改为**乐观更新为主**——`slotClick` 里客户端直接改自己的 `storage`（存入/删除即时生效，取出不改），**不依赖**服务器→客户端的槽位/NBT 同步；计数显示直接用 `storage.size()`。`reloadFromBackpack/needsReload` 保留作重开兜底。
+- **决策（乐观更新，1.0.1）**：客户端显示改为**乐观更新为主**——`slotClick` 里客户端直接改自己的 `storage`（存入/删除即时生效，取出不改），**不依赖**服务器→客户端的槽位/NBT 同步；计数显示直接用 `storage.size()`。`reloadFromBackpack/needsReload` 保留作重开兜底（存储改造后由服务器下发取代）。
 
 ### 第 3 轮 — Bug：取出后玩家背包不即时刷新
 - 现象：取出实际成功，但下方玩家背包不显示，重开才显示。
@@ -72,16 +72,46 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）** 的模组
 - 配置：`gradle.properties`（modId/modName）、`addon.gradle`（modVersion）、`InfinitePackMod.java`（MODID/MODNAME）。
 - ⚠️ MODID 变更 = 新 mod：需从测试实例 mods **移除旧的 `infinitepack-*.jar`**（否则两个 mod 同时加载）；旧背包物品失效（全新 1.0.0 起点）。
 
-### 第 10 轮 — SN 收尾澄清 + git 初始化 + v1.1 立项（2026-08-25）
+### 第 10 轮 — SN 收尾澄清 + git 初始化 + 1.0.1 立项（2026-08-25）
 - 命名澄清：**游戏内物品名/GUI 标题/创造标签都不加 SN**（仍是「得一即无限背包 / Infinite Pack」）；**模组名 `SN Infinite Pack` 与 modid `sninfinitepack` 保留**（只在模组列表/FML 日志可见，不影响游戏内 UI）。
 - 代码彩蛋：`InfinitePackMod.SN_FULL_NAME = "snang"`（SN 全称，仅代码可见；已验证编译进 jar 的 `InfinitePackMod.class`，不丢）。
 - 状态行整体上移 3px：`drawGuiContainerForegroundLayer` 的 y=131→128（约 0.3 字符高度）。
 - **git 初始化并首次提交**：`c:\project\mc\docker` 建仓，分支 `main`，commit `101938c`。`.gitignore` 排除 `mcmod/build|.gradle|run|out`、`test/`；`dist/` 入库（仅 sninfinitepack jar；已清掉 `build/libs` 里旧 infinitepack jar，防每次构建再复制进 dist）。
-- **v1.1 立项**（用户确认，本轮不做）：排序可切换 + 搜索 + UI 精简 + 海量存储改造。详见「第 9 节 v1.1 计划」。
+- **1.0.1 立项**（用户确认，本轮不做）：排序可切换 + 搜索 + UI 精简 + 海量存储改造。详见「第 9 节 1.0.1 计划」。
+
+### 第 11 轮 — 排序 + 搜索 + UI 精简（2026-08-25，版本 1.0.1）
+- **架构（关键决策落地）**：客户端按本地化物品名过滤+排序，算出「显示顺序」（真实条目索引 int[]），经 FML 简易通道发给服务器；服务器只存该顺序用于槽位→条目映射。搜索/排序只在客户端做；排序模式无需同步（顺序列表本身携带信息）。
+- **网络通道**：`NetworkHandler`（`newSimpleChannel("sninfpack")`）+ `MsgDisplayOrder`（int[] 序列化）+ `MsgDisplayOrderHandler`（服务器应用到 `player.openContainer`）。`displayOrder` 用 volatile 引用赋值（网络线程写/主线程读安全）；1.7.10 无 `addScheduledTask`，故不做主线程调度，只做不可变数组引用交接。
+- **BackpackStorage**：`Entry` 新增 `long lastAccess`（NBT 标签 `LastAccess` 持久化）；`accessClock` 由容器每次操作前设为 `world.getTotalWorldTime()`（不设置时回退系统毫秒，测试可用）。
+- **ContainerInfinitePack**：新增 `displayOrder` / `getEntryIndexForSlot(slotId)` / `getVisibleCount()` / `setDisplayOrder()`；`slotClick`/`transferStackInSlot` 的 entryIndex 全部改用 `getEntryIndexForSlot`；`detectAndSendChanges` 每 tick 收敛滚动（`clampScroll` 改 public，客户端重算后也调用）；`EntriesInventory.getStackInSlot` 用映射。
+- **GuiInfinitePack**：标题「得一即无限背包」→「**无限背包**」；状态行 = 搜索框（`GuiTextField`，空态占位「搜索」，`Esc` 仍关闭 GUI）+ 排序切换（点击循环：默认/最近/数量升/数量降，非默认橙色高亮）+ 页数（右对齐缩写）；删除模式时搜索框隐藏、左侧显示删除提示；`orderDirty` → 下一 tick 重算，`Arrays.equals` 仅变化时发包。
+- **排序**：默认=存入顺序（稳定排序保序）；最近存取=lastAccess 降序；数量升/降序。搜索按 `getDisplayName().toLowerCase().contains(q)`（中文 OK，客户端本地化）。
+- 构建成功（jar 40184B，dist 含 dev/sources 三个 jar 均入库），已部署测试实例并校验 SHA256 一致；**海量存储未动**（需先定架构，见第 9.3 节）。
+
+### 第 11 轮补 — 搜索/排序渲染 bug 修复（2026-08-25）
+- 用户实测：搜索/排序"不符合预期，数据变了 UI 没刷新"。
+- **根因**：`ContainerInfinitePack.getEntryIndexForSlot` 在显示顺序存在但 `vis` 越界（过滤/排序范围外）时返回 `vis`（自然偏移）→ **过滤范围外的槽位错误显示了自然偏移的条目**（如搜"土"只有 1 条可见，但 slot 1/2 仍显示 storage index 1/2 的其它条目），排序也被"部分自然偏移"干扰，看起来没生效。
+- **修复**：显示顺序存在时越界返回 `-1`（空），仅当 `displayOrder == null`（尚未收到顺序）才退化自然偏移；所有调用点（EntriesInventory/drawScreen/hover/删除确认/slotClick/transferStackInSlot）均已处理 -1。
+- 另给 `MsgDisplayOrderHandler` 加服务器收到顺序的日志，便于验证同步。
+
+### 第 12 轮 — 存储改造（方案 A：文件 NBT，不用 sqlite）（2026-08-25，版本 1.0.1）
+- **用户拍板**：确认方案一（文件 NBT）；顾虑①不同存档/用户是否分开 → 每个存档独立 world/data/，每个背包独立 UUID；②上万条是否卡顿 → 延迟保存 + 客户端分包下发 + 客户端排序/搜索毫秒级。
+- **不选 sqlite 的理由**：①排序/搜索在客户端做（本地化中文），服务端 SQL 查询无用；②1.7.10/GTNH 打包 sqlite-jdbc（native）风险高体积大；③NBT 文件随存档走，备份/回滚天然正确。
+- **新架构**：物品 NBT 只存 `infpack.uuid`；条目持久化到服务器 `world/data/sninfinitepack/<uuid>.nbt`（`CompressedStreamTools.write/read`）；旧格式（物品 NBT 内嵌 Entries）打开时自动迁移（导入文件 + 写 uuid + 清物品 NBT 条目）。
+- **新增类**：`BackpackDataManager`（懒初始化按玩家世界目录、缓存 Map<uuid,storage>、saveAll 于 FMLServerStoppingEvent）；`MsgBackpackData`（服务器→客户端分包下发条目：注册名/damage/count/lastAccess/完整NBT，PART_SIZE=100）；`MsgBackpackRequest`（客户端→服务器请求数据）；两个 handler。
+- **容器**：客户端 storage 由服务器下发填充（`applyServerData`），**删除原 `needsReload/reloadFromBackpack`**（物品 NBT 已无条目）；服务器操作后 `saveAndRefresh` = 写文件 + `sendDataToClient`（全量下发，客户端乐观更新随后被服务器权威数据收敛）；`onContainerClosed` 保存文件。
+- **GUI**：打开时发 `MsgBackpackRequest`（每秒重试直到收到），`consumeServerDataDirty` → 重算显示顺序；数据源不再依赖物品 NBT 同步（绕开 isChangingQuantityOnly 吞包的老坑）。
+- 客户端网络 handler 在 Netty 线程 → 用 `Minecraft.func_152344_a`（1.7.10 SRG 名）切主线程再改容器。
+- 构建成功（jar 51050B，版本 1.0.1），已部署并校验 SHA256；**验证中**（需实测：迁移、打开显示、存取/排序/搜索）。
+
+### 第 12 轮补 — 「最近」排序修复（2026-08-25）
+- 用户实测：「最近」排序不太对，期望最新发生存入/取出的排最前。
+- **根因**：时间戳原用 `world.getTotalWorldTime()`（tick 粒度 1/20s），同一 tick 内连续存取多个条目 → `lastAccess` 相同 → 稳定排序退化为插入顺序，无法反映最新操作（排序方向本身是对的：lastAccess 降序=最新在前）。
+- **修复**：`BackpackStorage.stamp()` 改用 `System.currentTimeMillis()` + 单调递增（同毫秒连续操作也严格递增）；删除 `accessClock` 字段与容器的 `stamp(player)` 调用（不再依赖 world tick；测试命令不设置时钟也能工作）。
 
 ---
 
-## 3. 当前现状（v1.0.0 · SN 版）
+## 3. 当前现状（1.0.1 · 文件 NBT 存储版）
 
 ### 已实现功能
 - **存入**：手拿物品点条目格（插到该格）/ Shift+玩家背包物品整组存入 → `count += 数量`。
@@ -91,7 +121,7 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）** 的模组
 - **计数显示**：条目格右下角数字，正=白、负/0=红；**大数缩写（万/亿）+ 超宽缩小字体**；**悬停显示精确数量 tooltip**。
 - **变体精确匹配**：物品注册名 + 耐久 + 完整 NBT 深度等价 = 同一条目；满耐久弓 vs 耗弓、不同附魔/属性 = 独立条目。
 - **合成配方**：8 泥土 + 1 木头。
-- **持久化**：全部数据在背包物品 NBT（`infpack.Entries`，每条目 `{Item注册名, Damage, Tag, Count}`），随物品走，服务器权威。
+- **持久化（存储改造）**：物品 NBT 只存 `infpack.uuid`；条目存服务器 `world/data/sninfinitepack/<uuid>.nbt`，随存档走，服务器权威；打开/操作时由服务器分包下发到客户端。
 
 ### 已知问题 / 说明
 - NEI/创造给的物品可存入并无限取出（模组无法区分来源，用户决定保持现状）。
@@ -99,9 +129,15 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）** 的模组
 - `/infpacktest` 自动化测试命令已实现（`CommandInfPackTest`，含计数透支校验）但**从未在服务器跑通**（GTNH 服务器端受限），当前作为代码级测试参考。
 
 ### 数据模型（`BackpackStorage`）
-- `Entry{sample(样本 stackSize=1), count}`；`entries: List<Entry>`。
-- API：`load/save(ItemStack)`、`size/isEmpty`、`getSample/getCount/getDisplayStack`、`deposit(stack, backpackItem, index)`、`withdraw(index, amount)`、`removeEntry`、`contains/indexOf`、`sameVariant`。
+- `Entry{sample(样本 stackSize=1), count, lastAccess}`；`entries: List<Entry>`。
+- API：`load/save(ItemStack)`、`size/isEmpty`、`getSample/getCount/getLastAccess/getDisplayStack`、`deposit(stack, backpackItem, index)`、`withdraw(index, amount)`、`removeEntry`、`contains/indexOf`、`sameVariant`。
 - 显示用 `getDisplayStack` 返回 stackSize=1，数量由 GUI 画。
+
+### 1.0.1 新增（第 11/12 轮，验证中）
+- **搜索框**：状态行左侧，按物品显示名（本地化）过滤，中文可用。
+- **排序切换**：状态行点击循环 默认/最近/数量升/数量降；非默认橙色高亮。
+- **显示顺序同步**：客户端算好 int[] 顺序发服务器，服务器 `getEntryIndexForSlot` 映射槽位→真实条目；排序/搜索下存取、删除、滚动均命中正确条目。
+- **UI 精简**：标题「无限背包」；搜索框 + 排序切换 + 页数右对齐；删除模式隐藏搜索框显示删除提示。
 
 ---
 
@@ -120,13 +156,13 @@ docker compose -f c:\project\mc\docker\compose.yaml up -d
 
 # 构建并复制到 dist
 docker exec mcmod-dev bash /scripts/build_release.sh
-# 产物：c:\project\mc\docker\dist\sninfinitepack-1.0.0.jar
+# 产物：c:\project\mc\docker\dist\sninfinitepack-1.0.1.jar
 ```
 
 ### 修改后必做
 1. 用 SRG/反编译源里的方法名（partial-MCP）。
 2. 构建成功后再安装。
-3. **先确认游戏已关闭**，再 `Copy-Item` 覆盖 `nw-mc-20251224-test\...\.minecraft\mods\sninfinitepack-1.0.0.jar`（并**移除旧的 `infinitepack-*.jar`**；校验 SHA256 与 dist 一致）。
+3. **先确认游戏已关闭**，再 `Copy-Item` 覆盖 `nw-mc-20251224-test\...\.minecraft\mods\sninfinitepack-1.0.1.jar`（并**移除旧的 `sninfinitepack-1.0.0.jar` / `infinitepack-*.jar`**——同 modid 冲突会双加载；校验 SHA256 与 dist 一致）。
 4. 让用户重启游戏（或代启动）。
 
 ---
@@ -180,15 +216,17 @@ Start-Process "C:\project\mc\nw-mc-20251224-test\prismlauncher.exe" -ArgumentLis
 
 ## 8. 待办 / 可选方向
 
-- [x] **v1.1：排序切换 + 搜索 + UI 精简 + 海量存储**（已立项，见第 9 节，下一轮开发）。
+- [x] **1.0.1：排序切换 + 搜索 + UI 精简**（第 11 轮已完成，见第 9 节）。
+- [x] **1.0.1：海量存储改造（方案 A 文件 NBT）**（第 12 轮已完成，验证中）。
 - [ ] 真实服务器部署（等待用户决策/提供 ServerPack）。
 - [ ] `/infpacktest` 在真实服务器跑通。
 - [ ] 共享仓库 / 公会共享背包（全新设计，当前无）。
 - [ ] 创造模式禁止存入（可选，用户尚未决定）。
+- [ ] **强制生存指令**（可行性：可行，未实施；详见第 10 节）：一条指令两参数（密码 + 启停），对所有存档生效；创造创建的存档→拒绝游玩；生存创建的存档→切创造自动改回生存；停用需密码。
 
 ---
 
-## 9. v1.1 计划（下一轮开发，用户已确认；本轮不实现）
+## 9. 1.0.1 计划（排序/搜索/UI 精简 + 海量存储均已实施，验证中）
 
 ### 9.1 目标功能（用户原话归纳）
 1. **顺序可切换排序**：`最近存取 / 数量升序 / 数量降序`（建议另保留 `默认=存入顺序` 作基态）。
@@ -227,3 +265,38 @@ Start-Process "C:\project\mc\nw-mc-20251224-test\prismlauncher.exe" -ArgumentLis
 
 ### 9.5 验收
 - 切排序后格子顺序正确；搜索能按中文名过滤；搜索/排序状态下存入、取出、删除都命中正确条目；重开后顺序/搜索合理。
+
+---
+
+## 10. 新需求评估：强制生存指令（可行性：可行，未实施）
+
+### 10.1 需求（用户原话归纳）
+- 一条指令，两个参数：`pass`（密码）与启停（enable/disable）。启用时设置密码；对所有存档生效。
+- 启用后按每个存档**创建时的模式**处理：
+  - 创建时是**创造** → 直接拒绝游玩（全屏拦截「当前存档禁止游玩」），即使玩家输入命令改生存也不行。
+  - 创建时是**生存** → 允许玩；但用 /gamemode 或其它方式切成创造 → **自动改回生存**。
+- 停用需密码正确才停用。
+
+### 10.2 可行性结论：**可行**（1.7.10 Forge 均支持），但有三处需注意
+
+| 需求点 | 1.7.10 方案 | 难度 |
+|---|---|---|
+| 指令两参数 | `CommandBase`（同 `CommandInfPackTest`） | 低 |
+| 全局配置（所有存档生效） | 存 `config/sninfinitepack/` 文件（不随存档），含 `enabled + 密码` | 低 |
+| 识别存档创建模式 | `world.getWorldInfo().getGameType()`（level.dat GameType，创建时设定） | 中 |
+| 创造存档拒绝游玩 | 登录/世界加载时检查 → `kickPlayerFromServer`（单人回标题）或客户端全屏 GUI | 中 |
+| 生存存档切创造→改回 | Forge `PlayerGameTypeChangeEvent` + 每 tick 兜底检测 | 低 |
+
+### 10.3 关键注意点 / 风险
+1. **「创建模式」是近似**：`WorldInfo.getGameType()` 是存档默认模式（创建时设定），但 `/defaultgamemode` 会改它 → 严格"创建时"需在首次进入时快照记录（可接受近似）。
+2. **单机玩家可改文件**：客户端玩家有存档/config 文件完全访问权，任何强制都是**软约束**（玩家可编辑 level.dat 或删配置绕过）。要硬约束需外部手段（只读权限/独立服务端），需用户明确是否可接受软约束。
+3. **密码安全**：建议存哈希（SHA-256+salt），勿明文；忘密码 → 删除配置文件即可重置（需 OP/控制台操作）。
+4. **"全屏拦截"实现**：服务器 `PlayerLoggedInEvent`/世界加载检查创造存档 → kick 回标题并提示；若需真正的"全屏界面"则要客户端 GUI（较重，可后置）。
+5. 集成服务器（单人）踢出的玩家体验：回标题 + 明确提示。
+
+### 10.4 建议实施步骤（后续做时）
+1. `ForceSurvivalConfig`：config 文件存 enabled/密码哈希。
+2. `CommandForceSurvival`：`/infpackforesurv <pass> <enable|disable>`（校验密码、设置/停用）。
+3. `PlayerGameTypeChangeEvent` 监听：生存存档 + 强制生存 + 变创造 → 改回生存；每 tick 兜底防绕过。
+4. 世界加载/玩家登录检查：创造存档 + 强制生存 → 拒绝进入（kick + 提示）。
+5. 可选：客户端全屏拦截 GUI（后置）。

@@ -8,6 +8,7 @@ import net.minecraft.inventory.Container;
 import net.minecraft.inventory.ICrafting;
 import net.minecraft.inventory.IInventory;
 import net.minecraft.inventory.Slot;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 
@@ -20,10 +21,9 @@ import net.minecraft.nbt.NBTTagCompound;
  *  - Shift+点击玩家背包物品 = 存入；Shift+点击条目 = 取一整组
  *  - 删除模式（右上角切换）：空手点击条目 = 删除
  *
- * 客户端本地不处理取出/删除（返回 null，与服务器一致即被确认）。
- * 客户端条目显示采用"乐观更新"：点击时客户端直接改自己的 storage（存入即显示、
- * 删除即消失、取出无限不变），不依赖服务器→客户端的槽位/NBT 同步；
- * 同时保留从已同步背包 NBT 重载的兜底（reloadFromBackpack/needsReload）。
+ * 存储改造（方案 A）：条目数据存服务器文件（world/data/sninfinitepack/<uuid>.nbt），
+ * 物品 NBT 只存 infpack.uuid。客户端条目数据由服务器分包下发（MsgBackpackData），
+ * 客户端显示以"乐观更新 + 服务器权威下发收敛"；操作后服务器保存文件并重新下发。
  */
 public class ContainerInfinitePack extends Container {
 
@@ -34,15 +34,25 @@ public class ContainerInfinitePack extends Container {
 
     private final EntityPlayer player;
     private ItemStack backpack; // 玩家背包中的实际引用
-    private BackpackStorage storage; // 客户端可重载（见 reloadFromBackpack）
+    private BackpackStorage storage; // 客户端由服务器下发数据填充
 
-    /** 上次从背包 NBT 加载时的 infpack 根标签引用，用于客户端检测是否需重载。 */
-    private NBTTagCompound lastLoadedRoot;
+    /** 背包 UUID（物品 NBT infpack.uuid；服务器唯一标识）。 */
+    private String uuid;
+
+    /** 客户端：收到服务器下发的新数据（GUI 每 tick 消费并重算显示顺序）。 */
+    private volatile boolean serverDataDirty = false;
 
     private final EntriesInventory entriesInv;
 
     private int scrollOffset = 0;
     private boolean deleteMode = false;
+
+    /**
+     * 显示顺序：过滤+排序后的真实条目索引列表（客户端计算并下发；服务器存接收值）。
+     * volatile：网络线程写入、主线程读取，只做不可变数组引用赋值，安全。
+     * null = 尚未收到顺序（按自然偏移映射）。
+     */
+    private volatile int[] displayOrder;
 
     private int lastSentMode = -1;
     private int lastSentScroll = -1;
@@ -51,9 +61,18 @@ public class ContainerInfinitePack extends Container {
     public ContainerInfinitePack(EntityPlayer player) {
         this.player = player;
         this.backpack = findBackpack(player);
-        this.storage = BackpackStorage.load(backpack);
-        this.lastLoadedRoot = getBackpackRoot(backpack);
         this.entriesInv = new EntriesInventory(this);
+
+        if (player.worldObj.isRemote) {
+            // 客户端：条目数据由服务器分包下发，storage 初始为空
+            this.storage = new BackpackStorage();
+            this.uuid = BackpackStorage.getUuid(backpack);
+        } else {
+            // 服务器：旧格式迁移 → 确保 uuid → 从文件加载
+            migrateLegacy(player);
+            this.uuid = BackpackStorage.ensureUuid(backpack);
+            this.storage = BackpackDataManager.ensure(player).load(uuid);
+        }
 
         for (int row = 0; row < ENTRY_ROWS; row++) {
             for (int col = 0; col < ENTRY_COLS; col++) {
@@ -89,6 +108,110 @@ public class ContainerInfinitePack extends Container {
         return storage.size();
     }
 
+    /** 可见条目数：有显示顺序则按顺序长度（过滤后），否则=存储条目数。 */
+    public int getVisibleCount() {
+        int[] order = displayOrder;
+        return order != null ? order.length : storage.size();
+    }
+
+    /**
+     * 槽位 → 真实条目索引：按客户端下发的显示顺序（过滤+排序）映射。
+     *  - 有显示顺序：越界（该槽在过滤/排序结果之外）= 空，返回 -1
+     *  - 无显示顺序（尚未收到）：退化为自然偏移（scrollOffset + slotId）
+     */
+    public int getEntryIndexForSlot(int slotId) {
+        int vis = scrollOffset + slotId;
+        int[] order = displayOrder;
+        if (order != null) {
+            if (vis >= 0 && vis < order.length) {
+                return order[vis];
+            }
+            return -1; // 过滤/排序范围外：该槽为空
+        }
+        return vis; // 尚未收到显示顺序：自然偏移
+    }
+
+    /** 服务器：接收客户端算好的显示顺序（过滤+排序后的真实条目索引）。 */
+    public void setDisplayOrder(int[] order) {
+        this.displayOrder = order; // 仅赋值不可变数组引用；滚动收敛交给主线程 detectAndSendChanges
+    }
+
+    /** 读取当前显示顺序（客户端重算后设置，GUI 展示用）。 */
+    public int[] getDisplayOrder() {
+        return displayOrder;
+    }
+
+    /** 背包 UUID（服务器唯一标识；客户端可能为 null 直到下发到达）。 */
+    public String getUuid() {
+        return uuid;
+    }
+
+    // ------------------------------------------------------------------ 存储（服务器文件）
+
+    /** 服务器：把条目数据分包下发给打开该背包的客户端玩家。 */
+    public void sendDataToClient() {
+        if (player instanceof EntityPlayerMP && uuid != null && uuid.length() > 0) {
+            int n = storage.size();
+            int partCount = Math.max(1, (n + MsgBackpackData.PART_SIZE - 1) / MsgBackpackData.PART_SIZE);
+            for (int p = 0; p < partCount; p++) {
+                int from = p * MsgBackpackData.PART_SIZE;
+                int cnt = Math.min(n, from + MsgBackpackData.PART_SIZE) - from;
+                MsgBackpackData msg = new MsgBackpackData();
+                msg.uuid = uuid;
+                msg.partIndex = p;
+                msg.partCount = partCount;
+                msg.itemNames = new String[cnt];
+                msg.damages = new int[cnt];
+                msg.counts = new int[cnt];
+                msg.lastAccesses = new long[cnt];
+                msg.tags = new NBTTagCompound[cnt];
+                for (int i = 0; i < cnt; i++) {
+                    int idx = from + i;
+                    ItemStack s = storage.getSample(idx);
+                    msg.itemNames[i] = Item.itemRegistry.getNameForObject(s.getItem());
+                    msg.damages[i] = s.getItemDamage();
+                    msg.counts[i] = storage.getCount(idx);
+                    msg.lastAccesses[i] = storage.getLastAccess(idx);
+                    msg.tags[i] = s.hasTagCompound() ? s.getTagCompound() : null;
+                }
+                NetworkHandler.NETWORK.sendTo(msg, (EntityPlayerMP) player);
+            }
+            InfinitePackMod.LOG.info("[infpack] server send backpack data uuid={} entries={} parts={}", uuid, n, partCount);
+        }
+    }
+
+    /** 客户端：应用服务器下发的条目数据（替代原物品 NBT reload 兜底）。 */
+    public void applyServerData(String serverUuid, BackpackStorage serverStorage) {
+        this.uuid = serverUuid;
+        this.storage = serverStorage;
+        clampScroll();
+        this.serverDataDirty = true;
+        InfinitePackMod.LOG.info("[infpack] client apply server data size={}", storage.size());
+    }
+
+    /** 客户端：GUI 每 tick 检查是否有服务器下发的新数据待刷新。 */
+    public boolean consumeServerDataDirty() {
+        boolean b = serverDataDirty;
+        serverDataDirty = false;
+        return b;
+    }
+
+    /** 服务器：旧格式（条目在物品 NBT、无 uuid）→ 导入服务器文件并写入 uuid。 */
+    private void migrateLegacy(EntityPlayer p) {
+        ItemStack bp = findBackpack(p);
+        if (BackpackStorage.isLegacy(bp)) {
+            BackpackDataManager dm = BackpackDataManager.ensure(p);
+            BackpackStorage old = BackpackStorage.load(bp); // 旧物品 NBT 条目
+            String newUuid = BackpackStorage.ensureUuid(bp);
+            dm.save(newUuid, old);
+            // 清空物品 NBT 中的条目，只留 uuid
+            NBTTagCompound root = bp.getTagCompound().getCompoundTag(BackpackStorage.TAG_KEY);
+            root.removeTag(BackpackStorage.TAG_ENTRIES);
+            p.inventory.markDirty();
+            InfinitePackMod.LOG.info("[infpack] 迁移旧格式背包 uuid={} entries={}", newUuid, old.size());
+        }
+    }
+
     // ------------------------------------------------------------------ 交互
 
     @Override
@@ -97,7 +220,7 @@ public class ContainerInfinitePack extends Container {
             if (mode == 5) {
                 return null; // 拖拽分发到条目槽无意义，忽略（避免误存入）
             }
-            int entryIndex = scrollOffset + slotId;
+            int entryIndex = getEntryIndexForSlot(slotId);
             ItemStack cursor = player.inventory.getItemStack();
 
             // 删除模式：空手点击删除该条目（客户端乐观删除，即时消失）
@@ -151,7 +274,7 @@ public class ContainerInfinitePack extends Container {
     public ItemStack transferStackInSlot(EntityPlayer player, int index) {
         if (index >= 0 && index < ENTRY_VISIBLE) {
             // Shift+条目 = 取一整组到玩家背包
-            int entryIndex = scrollOffset + index;
+            int entryIndex = getEntryIndexForSlot(index);
             if (entryIndex >= 0 && entryIndex < storage.size()) {
                 if (!player.worldObj.isRemote) {
                     withdrawToInventory(player, entryIndex, -1);
@@ -192,12 +315,12 @@ public class ContainerInfinitePack extends Container {
     public void onContainerClosed(EntityPlayer player) {
         super.onContainerClosed(player);
         if (!player.worldObj.isRemote) {
-            // 关闭时重新定位背包物品并保存，确保持久化到当前引用
+            // 关闭时重新定位背包物品并保存到服务器文件（物品 NBT 只存 uuid，不存条目）
             ItemStack bp = findBackpack(player);
             if (bp != null) {
                 this.backpack = bp;
-                storage.save(bp);
-                InfinitePackMod.LOG.info("[infpack] server close save size={}", storage.size());
+                BackpackDataManager.ensure(player).save(uuid, storage);
+                InfinitePackMod.LOG.info("[infpack] server close save uuid={} size={}", uuid, storage.size());
             }
         }
     }
@@ -220,8 +343,9 @@ public class ContainerInfinitePack extends Container {
     @Override
     public void detectAndSendChanges() {
         super.detectAndSendChanges();
+        clampScroll(); // 显示顺序变化（过滤/排序）后把滚动收敛到可见范围
         int mode = deleteMode ? 1 : 0;
-        int total = storage.size();
+        int total = getVisibleCount();
         if (mode != lastSentMode || scrollOffset != lastSentScroll || total != lastSentTotal) {
             for (Object o : this.crafters) {
                 ICrafting c = (ICrafting) o;
@@ -305,51 +429,28 @@ public class ContainerInfinitePack extends Container {
     }
 
     private void scroll(int delta) {
-        int max = Math.max(0, storage.size() - ENTRY_VISIBLE);
+        int max = Math.max(0, getVisibleCount() - ENTRY_VISIBLE);
         scrollOffset = Math.max(0, Math.min(max, scrollOffset + delta));
     }
 
-    private void clampScroll() {
-        int max = Math.max(0, storage.size() - ENTRY_VISIBLE);
+    /** 滚动收敛到可见范围（服务器 detectAndSendChanges 每 tick 调用；客户端重算顺序后调用）。 */
+    public void clampScroll() {
+        int max = Math.max(0, getVisibleCount() - ENTRY_VISIBLE);
         if (scrollOffset > max) {
             scrollOffset = max;
         }
     }
 
     private void saveAndRefresh() {
-        // 每次保存前重新定位背包物品，避免引用失效导致持久化丢失
-        ItemStack bp = findBackpack(player);
-        if (bp != null) {
-            this.backpack = bp;
-            storage.save(bp);
+        // 服务器：保存到文件 + 下发权威数据给客户端（乐观更新随后被收敛）；
+        if (!player.worldObj.isRemote) {
+            BackpackDataManager.ensure(player).save(uuid, storage);
+            sendDataToClient();
         }
         if (player != null) {
             player.inventory.markDirty();
         }
         clampScroll();
-    }
-
-    // ------------------------------------------------------------------ 客户端显示同步
-
-    /** 客户端是否需要重载：背包物品的 infpack 根 NBT 引用是否变化（服务器每次保存会新建）。 */
-    public boolean needsReload() {
-        return getBackpackRoot(findBackpack(player)) != lastLoadedRoot;
-    }
-
-    /** 从"已同步到客户端的背包物品 NBT"重载条目（仅客户端 GUI updateScreen 调用）。 */
-    public void reloadFromBackpack() {
-        ItemStack bp = findBackpack(player);
-        this.storage = BackpackStorage.load(bp);
-        this.lastLoadedRoot = getBackpackRoot(bp);
-        clampScroll();
-        InfinitePackMod.LOG.info("[infpack] client reload storage size={} scroll={}", storage.size(), scrollOffset);
-    }
-
-    private static NBTTagCompound getBackpackRoot(ItemStack bp) {
-        if (bp != null && bp.hasTagCompound() && bp.getTagCompound().hasKey(BackpackStorage.TAG_KEY)) {
-            return bp.getTagCompound().getCompoundTag(BackpackStorage.TAG_KEY);
-        }
-        return null;
     }
 
     // ------------------------------------------------------------------ 内部
@@ -394,7 +495,7 @@ public class ContainerInfinitePack extends Container {
 
         @Override
         public ItemStack getStackInSlot(int i) {
-            int idx = container.scrollOffset + i;
+            int idx = container.getEntryIndexForSlot(i);
             if (idx < 0 || idx >= container.storage.size()) {
                 return null;
             }

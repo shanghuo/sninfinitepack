@@ -2,6 +2,7 @@ package com.infpack;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -15,64 +16,123 @@ import net.minecraft.nbt.NBTTagList;
  *  - 放入：同变体则 count += 放入数量；否则新增条目 count = 放入数量。
  *  - 取出：count -= 取出数量（允许为负 = 无限透支，显示欠账给玩家补回正数的动力）。
  *  - 删除：移除条目。
+ *
+ * 存储改造（方案 A）：条目数据从"物品 NBT"迁到"服务器文件"，物品 NBT 只存
+ * infpack.uuid；序列化核心拆为 saveToNBT/loadFromNBT（供文件读写复用）。
  */
 public class BackpackStorage {
 
     public static final String TAG_KEY = "infpack";
+    public static final String TAG_UUID = "uuid";
     public static final String TAG_ENTRIES = "Entries";
     public static final String TAG_ITEM = "Item";
     public static final String TAG_DAMAGE = "Damage";
     public static final String TAG_TAG = "Tag";
     public static final String TAG_COUNT = "Count";
+    public static final String TAG_LAST_ACCESS = "LastAccess";
 
-    /** 条目：变体样本（stackSize=1）+ 计数（可负）。 */
+    /** 条目：变体样本（stackSize=1）+ 计数（可负）+ 最近存取时戳（排序用）。 */
     public static class Entry {
         public final ItemStack sample;
         public int count;
+        public long lastAccess;
 
         Entry(ItemStack sample, int count) {
             this.sample = sample;
             this.count = count;
+            this.lastAccess = 0L;
         }
     }
 
     private final List<Entry> entries = new ArrayList<Entry>();
 
-    /** 从背包物品的 NBT 载入条目。 */
+    /** 从背包物品的 NBT 载入条目（旧格式：条目在物品 NBT，仅迁移时用）。 */
     public static BackpackStorage load(ItemStack backpack) {
-        BackpackStorage storage = new BackpackStorage();
         if (backpack == null || !backpack.hasTagCompound() || !backpack.getTagCompound().hasKey(TAG_KEY)) {
+            return new BackpackStorage();
+        }
+        return loadFromNBT(backpack.getTagCompound().getCompoundTag(TAG_KEY));
+    }
+
+    /** 从纯 NBT 根载入条目（文件/物品 NBT 通用）。root 为 null 返回空。 */
+    public static BackpackStorage loadFromNBT(NBTTagCompound root) {
+        BackpackStorage storage = new BackpackStorage();
+        if (root == null) {
             return storage;
         }
-        NBTTagCompound root = backpack.getTagCompound().getCompoundTag(TAG_KEY);
         NBTTagList list = root.getTagList(TAG_ENTRIES, 10);
         for (int i = 0; i < list.tagCount(); i++) {
             NBTTagCompound e = list.getCompoundTagAt(i);
             ItemStack sample = stackFromNBT(e);
             if (sample != null && sample.getItem() != null) {
-                storage.entries.add(new Entry(sample, e.getInteger(TAG_COUNT)));
+                Entry entry = new Entry(sample, e.getInteger(TAG_COUNT));
+                entry.lastAccess = e.getLong(TAG_LAST_ACCESS);
+                storage.entries.add(entry);
             }
         }
         return storage;
     }
 
-    /** 保存条目到背包物品 NBT。 */
+    /** 保存条目到背包物品 NBT（旧格式，仅迁移/兼容用）。 */
     public void save(ItemStack backpack) {
         if (backpack == null) {
             return;
         }
+        if (!backpack.hasTagCompound()) {
+            backpack.setTagCompound(new NBTTagCompound());
+        }
         NBTTagCompound root = new NBTTagCompound();
+        saveToNBT(root);
+        backpack.getTagCompound().setTag(TAG_KEY, root);
+    }
+
+    /** 序列化条目到纯 NBT 根（文件/物品 NBT 通用）。 */
+    public void saveToNBT(NBTTagCompound root) {
         NBTTagList list = new NBTTagList();
         for (Entry entry : entries) {
             NBTTagCompound e = stackToNBT(entry.sample);
             e.setInteger(TAG_COUNT, entry.count);
+            e.setLong(TAG_LAST_ACCESS, entry.lastAccess);
             list.appendTag(e);
         }
         root.setTag(TAG_ENTRIES, list);
+    }
+
+    // ------------------------------------------------------------ UUID（物品 NBT 只存这个）
+
+    /** 读取背包物品的 UUID（新格式；无则返回 null）。 */
+    public static String getUuid(ItemStack backpack) {
+        if (backpack == null || !backpack.hasTagCompound() || !backpack.getTagCompound().hasKey(TAG_KEY)) {
+            return null;
+        }
+        NBTTagCompound root = backpack.getTagCompound().getCompoundTag(TAG_KEY);
+        return root.hasKey(TAG_UUID) ? root.getString(TAG_UUID) : null;
+    }
+
+    /** 确保背包物品有 UUID；没有则分配并写入物品 NBT（保留原有 infpack 根）。 */
+    public static String ensureUuid(ItemStack backpack) {
+        String uuid = getUuid(backpack);
+        if (uuid != null && uuid.length() > 0) {
+            return uuid;
+        }
+        uuid = UUID.randomUUID().toString();
         if (!backpack.hasTagCompound()) {
             backpack.setTagCompound(new NBTTagCompound());
         }
+        NBTTagCompound root = backpack.getTagCompound().hasKey(TAG_KEY)
+                ? backpack.getTagCompound().getCompoundTag(TAG_KEY) : new NBTTagCompound();
+        root.setString(TAG_UUID, uuid);
         backpack.getTagCompound().setTag(TAG_KEY, root);
+        return uuid;
+    }
+
+    /** 背包物品是否为旧格式（物品 NBT 内嵌条目且无 uuid，需要迁移）。 */
+    public static boolean isLegacy(ItemStack backpack) {
+        if (backpack == null || !backpack.hasTagCompound() || !backpack.getTagCompound().hasKey(TAG_KEY)) {
+            return false;
+        }
+        NBTTagCompound root = backpack.getTagCompound().getCompoundTag(TAG_KEY);
+        return !root.hasKey(TAG_UUID) && root.hasKey(TAG_ENTRIES);
     }
 
     public int size() {
@@ -97,6 +157,14 @@ public class BackpackStorage {
             return 0;
         }
         return entries.get(index).count;
+    }
+
+    /** 取第 index 个条目的最近存取时戳（用于"最近存取"排序；越大越新）。 */
+    public long getLastAccess(int index) {
+        if (index < 0 || index >= entries.size()) {
+            return 0L;
+        }
+        return entries.get(index).lastAccess;
     }
 
     /** 显示用栈：样本副本（stackSize=1），数量由 GUI 画在槽位右下角。 */
@@ -132,11 +200,15 @@ public class BackpackStorage {
         }
         int idx = indexOf(norm);
         if (idx >= 0) {
-            entries.get(idx).count += stack.stackSize; // 同变体：计数累加
+            Entry e = entries.get(idx);
+            e.count += stack.stackSize; // 同变体：计数累加
+            e.lastAccess = stamp();
             return false;
         }
         int ins = Math.max(0, Math.min(index, entries.size()));
-        entries.add(ins, new Entry(norm, stack.stackSize));
+        Entry ne = new Entry(norm, stack.stackSize);
+        ne.lastAccess = stamp();
+        entries.add(ins, ne);
         return true;
     }
 
@@ -154,6 +226,7 @@ public class BackpackStorage {
             return null;
         }
         e.count -= n;
+        e.lastAccess = stamp();
         ItemStack out = e.sample.copy();
         out.stackSize = n;
         return out;
@@ -193,6 +266,21 @@ public class BackpackStorage {
             return false;
         }
         return NbtUtil.tagsEqual(a.getTagCompound(), b.getTagCompound());
+    }
+
+    /**
+     * 存取时间戳：毫秒级 + 单调递增，保证同一 tick 内连续存取也能区分先后。
+     * （world.getTotalWorldTime() 是 tick 粒度，同 tick 操作无法区分，曾导致"最近"排序失效。）
+     */
+    private long lastStamp = 0L;
+
+    private long stamp() {
+        long now = System.currentTimeMillis();
+        if (now <= lastStamp) {
+            now = lastStamp + 1;
+        }
+        lastStamp = now;
+        return now;
     }
 
     private static ItemStack normalize(ItemStack stack) {

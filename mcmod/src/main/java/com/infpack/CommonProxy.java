@@ -6,6 +6,7 @@ import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 import cpw.mods.fml.common.event.FMLServerStartingEvent;
+import cpw.mods.fml.common.event.FMLServerStoppingEvent;
 import cpw.mods.fml.common.network.NetworkRegistry;
 import cpw.mods.fml.common.registry.GameRegistry;
 import net.minecraftforge.oredict.ShapedOreRecipe;
@@ -18,6 +19,7 @@ public class CommonProxy {
                 .setCreativeTab(InfinitePackMod.CREATIVE_TAB);
         GameRegistry.registerItem(InfinitePackMod.itemInfinitePack, "infinitePack");
         NetworkRegistry.INSTANCE.registerGuiHandler(InfinitePackMod.instance, new GuiHandler());
+        NetworkHandler.init(); // 显示顺序（排序/搜索）同步通道
     }
 
     public void init(FMLInitializationEvent event) {
@@ -32,5 +34,10 @@ public class CommonProxy {
 
     public void serverStarting(FMLServerStartingEvent event) {
         event.registerServerCommand(new CommandInfPackTest());
+    }
+
+    /** 服务器停止：全量写回背包数据文件。 */
+    public void serverStopping(FMLServerStoppingEvent event) {
+        BackpackDataManager.shutdown();
     }
 }
