@@ -230,6 +230,22 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）+ 1.12.2 / F
 - **构建/部署**：两版本 `--rerun-tasks` 强制重编译成功（gradle 对 bind-mount 文件时间戳判断偶发 up-to-date，需 `--rerun-tasks` 保险）；dist 四 jar 更新（1.7.10 63735B / 1.12.2 68032B）；已替换两测试实例 mods（备份 .bak，SHA256 与 dist 一致）；1.12.2 已启动实测。**用户实测两版本均通过**（颜色/字号/右缘/KMG 全部符合预期）。
 - **经验**：gradle + Windows bind-mount 修改源码后偶发误判 up-to-date，构建前用 `--rerun-tasks` 保险；1.12.2 中文环境画 GUI 数字文字须 `disableBlend + disableLighting + setUnicodeFlag(false)`。
 
+### 第 21 轮 — 换机接手 + 三个 Bug 修复（2026-09-23，分支 `fix/lock-crash-and-scroll`）
+- **背景**：工作区从旧机搬到本机 `C:\projects\2608-mc`（旧机 Docker 损坏）。核对结论：仓库在 `docker/`（分支 `main`，HEAD `74b5582`），比根目录的 `docker-backup.bundle`（`cf33691`，08-25 20:50）**更新**——bundle 是旧机快照，里面还残留 `scripts/slw.txt` / `scripts/javap_out.txt` 两个调试残留文件，本地 `12a12fb` 已删除；本地另有 `74b5582` 两个清理提交。**版本无冲突、无丢失**，以本地 `main` 为准。
+  - 本机需从零恢复：`mcmod-dev` 镜像、`docker_gradle-home` 卷都不存在（旧机 Docker 已毁），首次构建重新下载整套工具链。
+  - 代理换成 `127.0.0.1:7897`；容器内必须用 `host.docker.internal:7897`（见第 4 节）。
+- **Bug 1（1.12.2：创造拦截界面点「返回标题」崩溃）**
+  - 根因：`GuiForcedSurvivalDenied.actionPerformed` 里 `mc.world.sendQuittingDisconnectingPacket()` 之后调 `mc.displayGuiScreen(null)`。1.12.2 的 `NetworkManager.closeChannel()` 是 `channel.close().awaitUninterruptibly()`（**阻塞客户端线程**），断开流程 `NetHandlerPlayClient.onDisconnect → Minecraft.loadWorld(null)` 会在另一线程把 `world`/`player` 置空；而 `Minecraft.displayGuiScreen(null)`（1.12.2 第 1056 行）只要 `world != null` 就会解引用 `this.player.getHealth()`。`world`/`player` 是两个非 volatile 字段、不同步读取，一旦读到「world 还是旧的、player 已置空」就 NPE → 崩溃（报告描述通常是 `Updating screen events`）。1.7.10 的 `closeChannel` **不做 await**，断开晚一个 tick 才在主线程发生，所以同款代码在 1.7.10 侥幸不崩——这正好解释了"1.7.10 正常"。
+  - 修复：改用原版「保存并退出到标题」的同款安全序列（`GuiIngameMenu` id=1 分支）：`sendQuittingDisconnectingPacket()` → `mc.loadWorld(null)`（在客户端线程内完成世界/玩家卸载）→ `mc.displayGuiScreen(new GuiMainMenu())`。传非 null 的 `GuiMainMenu` 可完全绕开 `player.getHealth()` 那条分支。**只改 1.12.2**（1.7.10 用户实测正常，不动）。
+- **Bug 2（1.7.10：滚轮"一个一个往后翻"）**
+  - 根因：`enchantItem(id)` → `scroll(±1)`，即每次滚轮只挪 1 条；日志实证 `scroll=` 只出现 1/2/3/4。
+  - 修复：步长改为 `SCROLL_STEP = ENTRY_COLS = 9`（**一行一行翻**）；并在 GUI 侧把**一个 tick 内的多个滚轮事件合并成一次翻动**（原来每个 LWJGL 事件都发一个包，自由滚轮会连翻）。
+  - **1.12.2 同样存在**（代码同源），一并修。
+- **Bug 3（1.7.10：滚轮导致鼠标位置的计数变化）**
+  - 排查过程：确认 1.7.10 的封包处理是在客户端主线程（`PlayerControllerMP.updateController() → NetworkManager.processReceivedPackets()`，而 `Minecraft.runTick` 的 `processReceivedPackets` 只在未进世界时走），FML 自定义包则经 `addScheduledTask` 切主线程——即客户端 GUI 状态变更全在主线程。静态看不出一条"只变数字不变图标"的路径，怀疑是**同一帧内多次读取（滚动偏移/显示顺序/存储）之间状态变化**导致的图标-计数不同源。
+  - 修复：容器加**渲染帧快照** `beginRenderFrame()/endRenderFrame()`，`getStorage()/getScrollOffset()/getVisibleCount()/getEntryIndexForSlot()` 及 `EntriesInventory.getStackInSlot()` 在帧内统一走快照；两个版本都加（1.12.2 有 `PacketThreadUtil` 理论上更安全，但保持两版一致）。
+  - 同时留下**诊断日志**：`GuiInfinitePack.DEBUG_SCROLL = true` 时每次滚轮打 `hoverSlot/idx/item/count`。**待用户实测确认**：若仍出现"数字变、物品没变"，用该日志判断是"条目本身计数被改"还是"鼠标下物品其实换了"。确认后把 `DEBUG_SCROLL` 改 `false`。
+
 
 
 
@@ -242,8 +258,9 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）+ 1.12.2 / F
 - **存入**：手拿物品点条目格（插到该格）/ Shift+玩家背包物品整组存入 → `count += 数量`。
 - **取出**：空手左键条目 = 整组**拿到光标**（鼠标上）、右键 = 1 个**拿到光标**、Shift+条目 = 整组进玩家背包（与 MC 容器操作习惯一致）→ `count -= 数量`（可负，无限透支）。
 - **删除**：右上角切换删除模式（红色遮罩），空手左键条目**两次确认**后删除该条目。
-- **滚动**：鼠标滚轮翻页（每 54 条一页）。
+- **滚动**：鼠标滚轮**一行一行翻**（步长 `SCROLL_STEP = ENTRY_COLS = 9`，见 `ContainerInfinitePack.enchantItem`）；GUI 侧把**一个 tick 内的多个 LWJGL 滚轮事件合并成一次翻动**（`GuiInfinitePack.wheelDirection` + `flushWheel()`），避免自由滚轮/高分辨率滚轮"一滚飞到底"。
 - **计数显示**：条目格右下角数字，正=白、0/负=红；**统一 0.85 倍字号 + 大数缩写（K/M/G）+ 超宽再缩小 + 右缘对齐内收**（不左偏移、不溢出槽外）；**悬停显示精确数量 tooltip**。
+  - **图标与计数同源（第 21 轮）**：GUI 每帧绘制前 `container.beginRenderFrame()` 锁定一份（滚动偏移 / 显示顺序 / 存储）快照，帧内所有查询（原版画图标、计数覆盖层、悬停 tooltip）都走快照，帧末 `endRenderFrame()` 解除。保证「右下角数字」永远是「该格实际画出的那个物品」的计数，不会出现"图标没变、数字却变了"。
 - **变体精确匹配**：物品注册名 + 耐久 + 完整 NBT 深度等价 = 同一条目；满耐久弓 vs 耗弓、不同附魔/属性 = 独立条目。
 - **合成配方**：8 泥土 + 1 木头。
 - **持久化（存储改造）**：物品 NBT 只存 `infpack.uuid`；条目存服务器 `world/data/sninfinitepack/<uuid>.nbt`，随存档走，服务器权威；打开/操作时由服务器分包下发到客户端。
@@ -269,25 +286,30 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）+ 1.12.2 / F
 
 ## 4. 环境与构建
 
-### 目录结构（c:\project\mc）
-- `nw-mc-20251224/` — **真实实例，用户正在玩，禁止修改/装 mod**（未装 infinitepack）。
+### 目录结构（C:\projects\2608-mc）
+- `nw-mc-20251224/` — **真实实例，用户正在玩，禁止修改/装 mod**（未装 infinitepack）。注：本机工作区只搬来了 `nw-mc-20251224-test/`。
 - `nw-mc-20251224-test/` — **1.7.10 测试完整拷贝**，已装 infinitepack，内存 Min=1024/Max=4096。
 - `hmcl/` — **1.12.2 测试实例**（HMCL 启动器 + `.minecraft/versions/1.12.2-Forge/`，Forge 14.23.5.2864，mods 已装 sninfinitepack）。
 - `docker/` — 开发环境：`mcmod-1.7.10/`（1.7.10）+ `mcmod-1.12.2/`（1.12.2）两个版本源码工程、`dist/` 成品、`scripts/` 脚本、`compose.yaml`、`mcmod-1.7.10/build/rfg/` 反编译源。
-- 容器：`mcmod-dev`（构建）、`storage-dev`、`deepseekai-dsh`、`builder` —— **只可启动/停止，不要删除后三者**。
+- 容器：`mcmod-dev`（构建）—— **只可启动/停止，不要删除**。
+
+### 代理（2026-09-23 换机后更新）
+- 代理从旧机的 `192.168.1.243:7890` 换成本机 `127.0.0.1:7897`（Clash Verge / verge-mihomo）。
+- **容器内不能写 `127.0.0.1`**（那是容器自己），`docker/.env` 必须写 `PROXY_HOST=host.docker.internal:7897`。
+- 本机直连各源站也通（gradle/maven/forge/mojang/GTNH/adoptium/debian 实测全 OK），但保持走代理更稳、且不改任何镜像源。
 
 ### 构建命令
 ```powershell
 # 启动开发容器（若 mcmod-dev 未运行）
-docker compose -f c:\project\mc\docker\compose.yaml up -d
+docker compose -f C:\projects\2608-mc\docker\compose.yaml up -d
 
 # 构建 1.7.10 并复制到 dist（jar 带 -mc1.7.10 后缀）
 docker exec mcmod-dev bash /scripts/build_release_1.7.10.sh
-# 产物：c:\project\mc\docker\dist\sninfinitepack-1.0.2-mc1.7.10.jar
+# 产物：C:\projects\2608-mc\docker\dist\sninfinitepack-1.0.2-mc1.7.10.jar
 
 # 构建 1.12.2 并复制到 dist（jar 带 -mc1.12.2 后缀）
 docker exec mcmod-dev bash /scripts/build_release_1.12.2.sh
-# 产物：c:\project\mc\docker\dist\sninfinitepack-1.0.2-mc1.12.2.jar
+# 产物：C:\projects\2608-mc\docker\dist\sninfinitepack-1.0.2-mc1.12.2.jar
 ```
 
 ### 修改后必做
@@ -306,11 +328,11 @@ docker exec mcmod-dev bash /scripts/build_release_1.12.2.sh
 ### 启动测试实例
 ```powershell
 # 1.7.10（GTNH/Prism）
-Start-Process "C:\project\mc\nw-mc-20251224-test\prismlauncher.exe" -ArgumentList "--launch","GT_New_Horizons_2.8.4_Java_17-25"
+Start-Process "C:\projects\2608-mc\nw-mc-20251224-test\prismlauncher.exe" -ArgumentList "--launch","GT_New_Horizons_2.8.4_Java_17-25"
 # 账号：`test`（离线账号，Prism GUI 创建）。
 
 # 1.12.2（HMCL）
-Start-Process "C:\project\mc\hmcl\HMCL-3.16.3.exe" -ArgumentList "--launch","1.12.2-Forge"
+Start-Process "C:\projects\2608-mc\hmcl\HMCL-3.16.3.exe" -ArgumentList "--launch","1.12.2-Forge"
 ```
 - 两个版本都开单人世界（创造模式方便测试），合成 8泥土+1木头 或创造拿背包。
 - ⚠️ 用 `Start-Process` 启动 HMCL 后终端可能被游戏进程阻塞，后续命令用 `mode=async` 或先结束 java 进程。
@@ -321,7 +343,10 @@ Start-Process "C:\project\mc\hmcl\HMCL-3.16.3.exe" -ArgumentList "--launch","1.1
 3. 空手左键条目 → 整组拿到**光标**（鼠标上）、右键 → 1 个到光标、Shift+条目 → 整组进玩家背包；计数减少；一直取到负数（红色）仍能取出；光标即时显示取出的物品。
 4. 满耐久弓 vs 耗弓 = 两条独立条目；取出属性/附魔/NBT 与放入一致。
 5. 删除模式：第一次点击仅高亮，第二次同格才删除；点别处取消。
-6. 滚轮翻页正常。
+6. 滚轮**一行一行**翻（每次 9 格）；一次滚动动作只翻一行（连滚/自由滚轮不会飞）；翻页后鼠标下那格的**图标与右下角计数成对变化**——同一个物品的数字不会因为滚动而变。
+   - 诊断：`GuiInfinitePack` 里 `DEBUG_SCROLL = true` 时，每次滚轮会打一行
+     `[infpack] client SCROLL dir=.. scroll=.. hoverSlot=.. idx=.. item=.. count=..`，
+     用 `item=` 是否同步变化即可判断"数字变了但物品没变"是否真的发生。
 7. 合成 8泥土+1木头 → 得到背包。
 
 ### 日志（重要）
