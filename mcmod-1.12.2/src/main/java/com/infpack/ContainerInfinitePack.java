@@ -36,6 +36,11 @@ public class ContainerInfinitePack extends Container {
     public static final int ENTRY_ROWS = 6;
     public static final int ENTRY_VISIBLE = ENTRY_COLS * ENTRY_ROWS; // 54，占满 9x6 网格
     public static final int PLAYER_START = ENTRY_VISIBLE; // 54
+    /**
+     * 滚轮每次翻动的步长 = 一行（9 格）。
+     * 逐条翻（1 格）太碎、整页翻（54 格）太跳，一行一行翻既保留上下文又够快。
+     */
+    public static final int SCROLL_STEP = ENTRY_COLS;
 
     private final EntityPlayer player;
     private ItemStack backpack; // 玩家背包中的实际引用
@@ -58,6 +63,39 @@ public class ContainerInfinitePack extends Container {
      * null = 尚未收到顺序（按自然偏移映射）。
      */
     private volatile int[] displayOrder;
+
+    /**
+     * 渲染帧快照（仅客户端 GUI 使用）。
+     *
+     * 一帧之内，「滚动偏移 + 显示顺序 + 存储」会被读取多次：原版画图标读一次、
+     * 计数覆盖层读一次、悬停 tooltip 再读一次。如果这期间状态发生变化，就会出现
+     * 「图标还是旧的、右下角计数已经是新的」——表现就是玩家说的
+     * 「滚轮一滚，鼠标位置那个计数就跟着变，而图标没变」。
+     *
+     * 因此 GUI 在每帧绘制前 beginRenderFrame() 锁定一份快照，帧内所有查询都走快照，
+     * 保证同一帧内图标与计数必定来自同一份状态；endRenderFrame() 后恢复实时读取。
+     * （1.12.2 的封包都经 PacketThreadUtil 切到客户端主线程，本问题理论上比 1.7.10 轻，
+     *   这里保持与 1.7.10 同样的护栏，避免两版行为不一致。）
+     */
+    private int[] renderOrder;
+    private int renderScroll;
+    private BackpackStorage renderStorage;
+    private boolean rendering;
+
+    /** GUI 每帧绘制前调用：锁定本帧使用的（滚动偏移 / 显示顺序 / 存储）快照。 */
+    public void beginRenderFrame() {
+        this.renderOrder = displayOrder;
+        this.renderScroll = scrollOffset;
+        this.renderStorage = storage;
+        this.rendering = true;
+    }
+
+    /** GUI 每帧绘制后调用：解除快照，恢复实时读取。 */
+    public void endRenderFrame() {
+        this.rendering = false;
+        this.renderOrder = null;
+        this.renderStorage = null;
+    }
 
     private int lastSentMode = -1;
     private int lastSentScroll = -1;
@@ -97,11 +135,11 @@ public class ContainerInfinitePack extends Container {
     }
 
     public BackpackStorage getStorage() {
-        return storage;
+        return rendering && renderStorage != null ? renderStorage : storage;
     }
 
     public int getScrollOffset() {
-        return scrollOffset;
+        return rendering ? renderScroll : scrollOffset;
     }
 
     public boolean getDeleteMode() {
@@ -115,8 +153,8 @@ public class ContainerInfinitePack extends Container {
 
     /** 可见条目数：有显示顺序则按顺序长度（过滤后），否则=存储条目数。 */
     public int getVisibleCount() {
-        int[] order = displayOrder;
-        return order != null ? order.length : storage.size();
+        int[] order = rendering ? renderOrder : displayOrder;
+        return order != null ? order.length : getStorage().size();
     }
 
     /**
@@ -125,8 +163,8 @@ public class ContainerInfinitePack extends Container {
      *  - 无显示顺序（尚未收到）：退化为自然偏移（scrollOffset + slotId）
      */
     public int getEntryIndexForSlot(int slotId) {
-        int vis = scrollOffset + slotId;
-        int[] order = displayOrder;
+        int vis = (rendering ? renderScroll : scrollOffset) + slotId;
+        int[] order = rendering ? renderOrder : displayOrder;
         if (order != null) {
             if (vis >= 0 && vis < order.length) {
                 return order[vis];
@@ -348,10 +386,10 @@ public class ContainerInfinitePack extends Container {
             deleteMode = !deleteMode;
             return true;
         } else if (id == 1) {
-            scroll(-1);
+            scroll(-SCROLL_STEP);
             return true;
         } else if (id == 2) {
-            scroll(1);
+            scroll(SCROLL_STEP);
             return true;
         }
         return false;
@@ -580,16 +618,18 @@ public class ContainerInfinitePack extends Container {
 
         @Override
         public boolean isEmpty() {
-            return container.storage == null || container.storage.size() == 0;
+            BackpackStorage s = container.getStorage();
+            return s == null || s.size() == 0;
         }
 
         @Override
         public ItemStack getStackInSlot(int i) {
             int idx = container.getEntryIndexForSlot(i);
-            if (idx < 0 || idx >= container.storage.size()) {
+            BackpackStorage s = container.getStorage(); // 走帧快照：与计数覆盖层同源
+            if (idx < 0 || idx >= s.size()) {
                 return ItemStack.EMPTY; // 1.12.2 空槽必须返回 EMPTY，不能返回 null（否则 Container 同步 NPE 崩溃）
             }
-            return container.storage.getDisplayStack(idx);
+            return s.getDisplayStack(idx);
         }
 
         @Override

@@ -11,6 +11,7 @@ import net.minecraft.client.gui.GuiTextField;
 import net.minecraft.client.gui.inventory.GuiContainer;
 import net.minecraft.client.renderer.GlStateManager;
 import net.minecraft.inventory.Slot;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.ResourceLocation;
 
@@ -71,6 +72,17 @@ public class GuiInfinitePack extends GuiContainer {
     private boolean dataReceived = false;
     private int dataRequestCooldown = 0;
 
+    /** 本 tick 累积的滚轮方向（1=向上 / -1=向下 / 0=无）。同 tick 内多个事件合并为一次翻动。 */
+    private int wheelDirection = 0;
+
+    /** 滚轮诊断日志开关（排查"滚轮导致鼠标位置计数变化"用；确认结论后可改 false）。 */
+    private static final boolean DEBUG_SCROLL = true;
+    /** 上一帧鼠标下的条目信息（仅诊断日志用）。 */
+    private int diagSlot = -1;
+    private int diagIndex = -1;
+    private String diagName = "-";
+    private int diagCount = 0;
+
     public GuiInfinitePack(ContainerInfinitePack container) {
         super(container);
         this.container = container;
@@ -88,6 +100,7 @@ public class GuiInfinitePack extends GuiContainer {
     @Override
     public void updateScreen() {
         super.updateScreen();
+        flushWheel(); // 本 tick 累积的滚轮 → 合并成一次翻动
         // 条目数据由服务器分包下发（物品 NBT 只存 uuid）。
         // 打开时请求 + 每秒重试；收到后消费刷新标志 → 重算显示顺序。
         if (container.consumeServerDataDirty()) {
@@ -232,8 +245,22 @@ public class GuiInfinitePack extends GuiContainer {
         this.fontRenderer.drawString(pageText, px, STATUS_Y, deleteMode ? 0xFF0000 : 0x404040);
     }
 
+    /**
+     * 每帧绘制入口：整帧锁定一份容器状态快照，保证「图标」与「右下角计数」必定同源——
+     * 计数只随条目本身（存入/取出/删除）变化，不随滚轮翻页或同步时序变化。
+     * 详见 {@link ContainerInfinitePack#beginRenderFrame()}。
+     */
     @Override
     public void drawScreen(int mouseX, int mouseY, float partialTicks) {
+        container.beginRenderFrame();
+        try {
+            drawScreenFrame(mouseX, mouseY, partialTicks);
+        } finally {
+            container.endRenderFrame();
+        }
+    }
+
+    private void drawScreenFrame(int mouseX, int mouseY, float partialTicks) {
         super.drawScreen(mouseX, mouseY, partialTicks);
 
         // 图标渲染在 z=100 且开启深度测试；这里关闭深度测试，让文本/高亮/遮罩覆盖在图标上层
@@ -311,6 +338,12 @@ public class GuiInfinitePack extends GuiContainer {
             if (idx >= 0 && idx < container.getStorage().size()) {
                 int count = container.getStorage().getCount(idx);
                 this.drawHoveringText(Arrays.asList("\u6570\u91cf: " + count), mouseX, mouseY, this.fontRenderer);
+                // 记录本帧鼠标下的条目，供滚轮诊断日志使用（见 flushWheel）
+                diagSlot = hovered.slotNumber;
+                diagIndex = idx;
+                diagName = String.valueOf(Item.REGISTRY.getNameForObject(
+                        container.getStorage().getSample(idx).getItem()));
+                diagCount = count;
             }
         }
     }
@@ -429,7 +462,24 @@ public class GuiInfinitePack extends GuiContainer {
         int wheel = Mouse.getEventDWheel();
         if (wheel != 0) {
             pendingDelete = -1; // 滚动时取消待删除标记
-            this.mc.playerController.sendEnchantPacket(this.inventorySlots.windowId, wheel > 0 ? 1 : 2);
+            // 一次滚轮动作可能派发多个 LWJGL 事件（自由滚轮 / 高分辨率滚轮），
+            // 这里只累积方向，由 updateScreen 每 tick 合并成一次翻动，
+            // 避免"滚一下直接飞到底"。
+            wheelDirection = wheel > 0 ? 1 : -1;
         }
+    }
+
+    /** 把本 tick 累积的滚轮方向合并成一次翻动（步长 = 一行，见 SCROLL_STEP）。 */
+    private void flushWheel() {
+        if (wheelDirection == 0) {
+            return;
+        }
+        int dir = wheelDirection;
+        wheelDirection = 0;
+        if (DEBUG_SCROLL) {
+            InfinitePackMod.LOG.info("[infpack] client SCROLL dir={} scroll={} hoverSlot={} idx={} item={} count={}",
+                    dir, container.getScrollOffset(), diagSlot, diagIndex, diagName, diagCount);
+        }
+        this.mc.playerController.sendEnchantPacket(this.inventorySlots.windowId, dir > 0 ? 1 : 2);
     }
 }
