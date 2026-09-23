@@ -241,10 +241,27 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）+ 1.12.2 / F
   - 根因：`enchantItem(id)` → `scroll(±1)`，即每次滚轮只挪 1 条；日志实证 `scroll=` 只出现 1/2/3/4。
   - 修复：步长改为 `SCROLL_STEP = ENTRY_COLS = 9`（**一行一行翻**）；并在 GUI 侧把**一个 tick 内的多个滚轮事件合并成一次翻动**（原来每个 LWJGL 事件都发一个包，自由滚轮会连翻）。
   - **1.12.2 同样存在**（代码同源），一并修。
-- **Bug 3（1.7.10：滚轮导致鼠标位置的计数变化）**
-  - 排查过程：确认 1.7.10 的封包处理是在客户端主线程（`PlayerControllerMP.updateController() → NetworkManager.processReceivedPackets()`，而 `Minecraft.runTick` 的 `processReceivedPackets` 只在未进世界时走），FML 自定义包则经 `addScheduledTask` 切主线程——即客户端 GUI 状态变更全在主线程。静态看不出一条"只变数字不变图标"的路径，怀疑是**同一帧内多次读取（滚动偏移/显示顺序/存储）之间状态变化**导致的图标-计数不同源。
-  - 修复：容器加**渲染帧快照** `beginRenderFrame()/endRenderFrame()`，`getStorage()/getScrollOffset()/getVisibleCount()/getEntryIndexForSlot()` 及 `EntriesInventory.getStackInSlot()` 在帧内统一走快照；两个版本都加（1.12.2 有 `PacketThreadUtil` 理论上更安全，但保持两版一致）。
-  - 同时留下**诊断日志**：`GuiInfinitePack.DEBUG_SCROLL = true` 时每次滚轮打 `hoverSlot/idx/item/count`。**待用户实测确认**：若仍出现"数字变、物品没变"，用该日志判断是"条目本身计数被改"还是"鼠标下物品其实换了"。确认后把 `DEBUG_SCROLL` 改 `false`。
+- **Bug 3（1.7.10：滚轮导致鼠标位置的计数变化）—— 真根因已定位（2026-09-23，靠诊断日志实证）**
+  - **日志证据**（`fml-client-latest.log` 滚轮测试段）：每次滚轮都紧跟一条
+    `client SHIFT-WITHDRAW idx=<鼠标下那一格> count=...`，而且扣的是**一整组**
+    （烟花 `1 → -63`、1 格的日志书 `0 → -1 → -2 → …`）。这些行**只有 client、没有 server 对应行**，
+    说明该动作绕过了服务端事务、只在客户端本地改了计数 —— 所以画面上的数字一路变负。
+  - **真根因**：GTNH（`lwjgl3ify`）环境下**滚轮事件会带上按键状态**。模组把滚轮事件透传给了
+    `super.handleMouseInput()`，原版 `GuiScreen` 于是按鼠标按键事件处理，`GuiContainer` 最终把它
+    变成作用在「鼠标下那一格」上的 **Shift+左键点击**（mode=1 / clickedButton=0）。而模组把
+    "Shift+点击条目"定义为**取一整组进玩家背包**，所以每滚一格就整组扣掉那一格的计数；
+    又因这次点击的服务端事务被拒，扣数只落在客户端本地。
+  - **第一次修复（渲染帧快照）不是根因**：容器加的 `beginRenderFrame()/endRenderFrame()` 帧快照
+    （保证图标与计数同源）是对的加固，但症状依旧 —— 问题不在渲染同源，而在**输入处理**。
+    该快照保留（无害且更稳）。
+  - **修复**：`GuiInfinitePack.handleMouseInput()` 一旦读到 `Mouse.getEventDWheel() != 0`，
+    **只累积翻页方向并直接 return，绝不调用 `super.handleMouseInput()`**；再给
+    `mouseClicked` / `mouseMovedOrUp`（1.12.2 是 `mouseReleased`）/ `mouseClickMove` 加
+    `isWheelEvent()` 双保险。两版本都加。
+  - **经验（铁律级）**：容器 GUI 里**滚轮事件绝不能透传给原版鼠标处理**（不同输入环境对 LWJGL
+    滚轮事件的按键字段实现不一致）；另外**客户端的乐观更新必须有服务端对应动作**，否则一旦
+    服务端事务被拒，本地计数就会单方面漂移（本次漂到了负数）。
+  - `DEBUG_SCROLL` 诊断日志暂时保留，复测时用来确认滚轮不再产生 `SHIFT-WITHDRAW`；确认后可置 false。
 
 
 
@@ -343,10 +360,11 @@ Start-Process "C:\projects\2608-mc\hmcl\HMCL-3.16.3.exe" -ArgumentList "--launch
 3. 空手左键条目 → 整组拿到**光标**（鼠标上）、右键 → 1 个到光标、Shift+条目 → 整组进玩家背包；计数减少；一直取到负数（红色）仍能取出；光标即时显示取出的物品。
 4. 满耐久弓 vs 耗弓 = 两条独立条目；取出属性/附魔/NBT 与放入一致。
 5. 删除模式：第一次点击仅高亮，第二次同格才删除；点别处取消。
-6. 滚轮**一行一行**翻（每次 9 格）；一次滚动动作只翻一行（连滚/自由滚轮不会飞）；翻页后鼠标下那格的**图标与右下角计数成对变化**——同一个物品的数字不会因为滚动而变。
+6. 滚轮**一行一行**翻（每次 9 格）；一次滚动动作只翻一行（连滚/自由滚轮不会飞）；**滚轮绝对不会改动任何条目的计数**（鼠标下那一格的数字只随翻页换条目而变）。
    - 诊断：`GuiInfinitePack` 里 `DEBUG_SCROLL = true` 时，每次滚轮会打一行
-     `[infpack] client SCROLL dir=.. scroll=.. hoverSlot=.. idx=.. item=.. count=..`，
-     用 `item=` 是否同步变化即可判断"数字变了但物品没变"是否真的发生。
+     `[infpack] client SCROLL dir=.. scroll=.. hoverSlot=.. idx=.. item=.. count=..`；
+     **复测要点**：滚轮期间日志里**不应再出现 `client SHIFT-WITHDRAW`**（那正是 Bug 3 的病灶），
+     且 `count=` 只会因为鼠标下换了物品而变化。
 7. 合成 8泥土+1木头 → 得到背包。
 
 ### 日志（重要）
