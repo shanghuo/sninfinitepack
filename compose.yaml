@@ -1,4 +1,6 @@
 # MC 模组开发环境 —— 仅用于开发模组（新容器，不影响现有容器）
+# 固定 compose 项目名（与 build-rust 的 docker 目录区分，防止 compose down 误删其他项目容器）
+name: mcmod
 services:
   dev:
     build:
@@ -8,6 +10,13 @@ services:
     image: mcmod-dev:latest
     container_name: mcmod-dev
     restart: "no"
+    # 资源限制：2 核 4G（与运行中 docker update 一致，防止 compose up 回退）
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4g
+    memswap_limit: 8g
     working_dir: /work/mcmod-1.7.10
     environment:
       HTTP_PROXY: http://${PROXY_HOST:?请在 .env 设置 PROXY_HOST}
@@ -29,3 +38,5 @@ services:
 
 volumes:
   gradle-home:
+    external: true
+    name: docker_gradle-home   # 外部卷（compose 不管理/不删除），gradle 缓存不丢
