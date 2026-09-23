@@ -2,7 +2,9 @@ package com.infpack;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiButton;
+import net.minecraft.client.gui.GuiMainMenu;
 import net.minecraft.client.gui.GuiScreen;
+import net.minecraft.client.multiplayer.WorldClient;
 
 import net.minecraftforge.fml.relauncher.Side;
 import net.minecraftforge.fml.relauncher.SideOnly;
@@ -41,12 +43,26 @@ public class GuiForcedSurvivalDenied extends GuiScreen {
     @Override
     protected void actionPerformed(GuiButton button) {
         if (button.id == 0) {
-            // 返回标题：发送断开包并关闭拦截界面（随后回到主菜单）
+            // 返回标题：走原版「保存并退出到标题」的同款安全序列（见 GuiIngameMenu id=1 分支）。
+            //
+            // 不能只调 displayGuiScreen(null)：
+            //  1.12.2 的 NetworkManager.closeChannel() 会 channel.close().awaitUninterruptibly()
+            //  阻塞客户端线程，而断开流程（NetHandlerPlayClient.onDisconnect → loadWorld(null)）
+            //  会在别的线程把 world / player 置空；
+            //  紧接着的 Minecraft.displayGuiScreen(null) 只要读到 world != null，就会走
+            //  `this.player.getHealth()` 分支（Minecraft.java:1056）——world 与 player 是两个
+            //  非 volatile 字段、不同步读取，一旦读到「world 还是旧的、player 已被置空」就会 NPE 崩溃。
+            //  1.7.10 的 closeChannel 不做 await，断开晚一个 tick 才在主线程发生，所以同样的代码
+            //  在 1.7.10 侥幸不崩。
+            //
+            // loadWorld(null) 在客户端线程内完成世界/玩家卸载，再显式传入非 null 的 GuiMainMenu，
+            // 即可完全绕开上面那条 player 解引用（该分支只在 guiScreenIn == null 时才评估）。
             Minecraft mc = Minecraft.getMinecraft();
             if (mc.world != null) {
                 mc.world.sendQuittingDisconnectingPacket();
             }
-            mc.displayGuiScreen(null);
+            mc.loadWorld((WorldClient) null);
+            mc.displayGuiScreen(new GuiMainMenu());
         }
     }
 
