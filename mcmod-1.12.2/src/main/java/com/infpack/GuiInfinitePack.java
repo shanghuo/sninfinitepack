@@ -350,6 +350,9 @@ public class GuiInfinitePack extends GuiContainer {
 
     @Override
     protected void mouseClicked(int mouseX, int mouseY, int button) throws IOException {
+        if (isWheelEvent()) {
+            return; // 双保险：滚轮事件不当作点击
+        }
         int lx = mouseX - guiLeft;
         int ly = mouseY - guiTop;
 
@@ -456,17 +459,46 @@ public class GuiInfinitePack extends GuiContainer {
         return g + "." + dec + "G";
     }
 
+    /**
+     * 当前 LWJGL 事件是不是滚轮事件。
+     * 只允许在 Mouse.next() 驱动的事件回调链里调用（handleMouseInput / mouseClicked /
+     * mouseReleased / mouseClickMove）——此时 getEventDWheel() 读的就是当前事件。
+     */
+    private static boolean isWheelEvent() {
+        return Mouse.getEventDWheel() != 0;
+    }
+
     @Override
     public void handleMouseInput() throws IOException {
-        super.handleMouseInput();
         int wheel = Mouse.getEventDWheel();
         if (wheel != 0) {
+            // 滚轮事件只用于翻页，绝不交给原版鼠标处理（不调 super）。
+            // 原因同 1.7.10 版：某些输入环境（GTNH/lwjgl3ify）下滚轮事件会带按键状态，
+            // 原版会把它当成作用在「鼠标下那一格」上的 Shift+左键点击，把那一格的数量扣掉。
             pendingDelete = -1; // 滚动时取消待删除标记
             // 一次滚轮动作可能派发多个 LWJGL 事件（自由滚轮 / 高分辨率滚轮），
             // 这里只累积方向，由 updateScreen 每 tick 合并成一次翻动，
             // 避免"滚一下直接飞到底"。
             wheelDirection = wheel > 0 ? 1 : -1;
+            return;
         }
+        super.handleMouseInput();
+    }
+
+    @Override
+    protected void mouseReleased(int mouseX, int mouseY, int state) {
+        if (isWheelEvent()) {
+            return; // 双保险：滚轮事件不当作按键抬起
+        }
+        super.mouseReleased(mouseX, mouseY, state);
+    }
+
+    @Override
+    protected void mouseClickMove(int mouseX, int mouseY, int clickedMouseButton, long timeSinceLastClick) {
+        if (isWheelEvent()) {
+            return; // 双保险：滚轮事件不当作拖拽
+        }
+        super.mouseClickMove(mouseX, mouseY, clickedMouseButton, timeSinceLastClick);
     }
 
     /** 把本 tick 累积的滚轮方向合并成一次翻动（步长 = 一行，见 SCROLL_STEP）。 */

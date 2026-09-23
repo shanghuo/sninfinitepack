@@ -331,6 +331,9 @@ public class GuiInfinitePack extends GuiContainer {
 
     @Override
     protected void mouseClicked(int mouseX, int mouseY, int button) {
+        if (isWheelEvent()) {
+            return; // 双保险：滚轮事件不当作点击
+        }
         int lx = mouseX - guiLeft;
         int ly = mouseY - guiTop;
 
@@ -437,17 +440,52 @@ public class GuiInfinitePack extends GuiContainer {
         return g + "." + dec + "G";
     }
 
+    /**
+     * 当前 LWJGL 事件是不是滚轮事件。
+     * 只允许在 Mouse.next() 驱动的事件回调链里调用（handleMouseInput / mouseClicked /
+     * mouseMovedOrUp / mouseClickMove）——此时 getEventDWheel() 读的就是当前事件。
+     */
+    private static boolean isWheelEvent() {
+        return Mouse.getEventDWheel() != 0;
+    }
+
     @Override
     public void handleMouseInput() {
-        super.handleMouseInput();
         int wheel = Mouse.getEventDWheel();
         if (wheel != 0) {
+            // 滚轮事件只用于翻页，绝不交给原版鼠标处理（不调 super）。
+            //
+            // 原因：GTNH(lwjgl3ify) 环境下滚轮事件会带上按键状态，原版
+            // GuiScreen.handleMouseInput -> GuiContainer 会把它当成一次鼠标事件处理，
+            // 最终变成作用在「鼠标下那一格」上的 Shift+左键点击（mode=1 / clickedButton=0）。
+            // 模组把 Shift+点击条目定义为"取一整组进玩家背包"，于是每滚一格就把那一格
+            // 的数量整组扣掉；又因这次点击的服务端事务被拒，扣数只发生在客户端本地
+            // （日志里只有 client SHIFT-WITHDRAW，没有 server 对应行）。
+            // 现象就是玩家反馈的"滚轮会改鼠标位置的物品数量"。
             pendingDelete = -1; // 滚动时取消待删除标记
             // 一次滚轮动作可能派发多个 LWJGL 事件（自由滚轮 / 高分辨率滚轮），
             // 这里只累积方向，由 updateScreen 每 tick 合并成一次翻动，
             // 避免"滚一下直接飞到底"。
             wheelDirection = wheel > 0 ? 1 : -1;
+            return;
         }
+        super.handleMouseInput();
+    }
+
+    @Override
+    protected void mouseMovedOrUp(int mouseX, int mouseY, int state) {
+        if (isWheelEvent()) {
+            return; // 双保险：滚轮事件不当作按键抬起/移动
+        }
+        super.mouseMovedOrUp(mouseX, mouseY, state);
+    }
+
+    @Override
+    protected void mouseClickMove(int mouseX, int mouseY, int clickedMouseButton, long timeSinceLastClick) {
+        if (isWheelEvent()) {
+            return; // 双保险：滚轮事件不当作拖拽
+        }
+        super.mouseClickMove(mouseX, mouseY, clickedMouseButton, timeSinceLastClick);
     }
 
     /** 把本 tick 累积的滚轮方向合并成一次翻动（步长 = 一行，见 SCROLL_STEP）。 */
