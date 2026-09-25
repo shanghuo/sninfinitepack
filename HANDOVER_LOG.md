@@ -1,6 +1,6 @@
 # Infinite Pack（得一即无限背包）开发交接记录
 
-> 本文档记录与用户的开发对话历程、关键决策、当前现状、构建与测试方法，供未来 AI / 协作者快速接手。最后更新：2026-08-25。
+> 本文档记录与用户的开发对话历程、关键决策、当前现状、构建与测试方法，供未来 AI / 协作者快速接手。最后更新：2026-09-25。
 
 ---
 
@@ -8,9 +8,9 @@
 
 Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）+ 1.12.2 / Forge 14.23.5.2864（HMCL 实测环境）** 的模组：玩家把任意物品放入背包物品后，可**无限取出**（属性/附魔/耐久/NBT 与放入时完全一致）。现为**计数制**——放入 +N、取出 -N、可为负（负数=无限透支），让玩家感知用了多少。
 
-- MODID：`sninfinitepack`；显示名 `SN Infinite Pack`；版本 `1.0.2`（**双版本 jar 命名带 mc 后缀**）
+- MODID：`sninfinitepack`；显示名 `SN Infinite Pack`；版本 `1.0.3`（**双版本 jar 命名带 mc 后缀**）
 - 源码：`docker/mcmod-1.7.10/src/main/java/com/infpack/`（1.7.10 版）；`docker/mcmod-1.12.2/src/main/java/com/infpack/`（1.12.2 版）
-- 成品：`docker/dist/sninfinitepack-1.0.2-mc1.7.10.jar`、`docker/dist/sninfinitepack-1.0.2-mc1.12.2.jar`（另有 -dev/-sources 同带 mc 后缀）
+- 成品：`docker/dist/sninfinitepack-1.0.3-mc1.7.10.jar`、`docker/dist/sninfinitepack-1.0.3-mc1.12.2.jar`（另有 -dev/-sources 同带 mc 后缀）
 - 语言：`assets/sninfinitepack/lang/{zh_CN,en_US}.lang`
 - 合成配方：8 泥土（矿辞 `dirt`）围一圈 + 中间 1 木头（矿辞 `logWood`）
 - **兼容性（完整核查结论，2026-08-25）**：两个版本都只依赖 MC 原版 + Forge(FML) 核心 API（import 无任何第三方模组包；无运行时依赖；`mcmod.info` requiredMods/dependencies 全空；GTNHGradle/RFG 仅为构建插件不进产物）。**与标准 Forge 1.7.10 / 1.12.2 原版及基础模组环境兼容**，不依赖 GTNH 特有内容；1.7.10 已在 GTNH 2.8.4 实机验证，1.12.2 已在 HMCL Forge 14.23.5.2864 实机验证。不覆盖任何原版/模组内容（注册名带 modid、配方矿辞叠加、通道名全局唯一）。
@@ -267,9 +267,27 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）+ 1.12.2 / F
 
 
 
+### 第 22 轮 — 定版 1.0.3 + 公开发布（2026-09-25）
+- **背景**：第 21 轮三个 Bug 修复已在两个测试实例实测通过，用户要求把最新版本推到 GitHub 并发新 release。
+- **版本号**：`1.0.2` → `1.0.3`。改动点（5 处配置 + 2 处文档）：
+  - `mcmod-1.7.10/addon.gradle` — `project.ext.modVersion`
+  - `mcmod-1.12.2/build.gradle.kts` — `version`（并 `injectedTags.put("VERSION", version)` → 生成 `Tags.VERSION`）
+  - `mcmod-1.12.2/src/main/resources/mcmod.info` — 1.12.2 的此处是**字面量**（1.7.10 用的是 `${modVersion}` 占位，随 addon.gradle 走）
+  - `scripts/build_release_1.7.10.sh`、`scripts/build_release_1.12.2.sh` — dist 产物命名
+  - `README.md` — 下载/安装处的 jar 名
+- **重新构建**：两版本 jar 均按 1.0.3 重新构建，产物复制进 `dist/`（构建命令见第 4 节）。
+- **顺带修复（1.12.2 产物版本号，1.0.2 及以前一直错）**：`build.gradle.kts` 里 `injectedTags.put("VERSION", version)` 的裸 `version` 解析到 `MinecraftExtension` **已废弃的 `version`（= mcVersion）**，所以 1.12.2 的 `Tags.VERSION` 实际是 `"1.12.2"`（已用 v1.0.2 发布产物 javap 复核确认）。改为 `project.version.toString()` 后，两版本 `Tags.VERSION` 与 `mcmod.info` 均为 `1.0.3`（1.7.10 一直是对的）。
+- **本版发布内容（相对 1.0.2）**：
+  1. 修复 1.12.2 强制生存拦截界面点「返回标题」崩溃（第 21 轮 Bug 1）。
+  2. 修复鼠标滚轮导致前端 UI 计数变化（第 21 轮 Bug 3；真根因：滚轮事件透传给原版鼠标处理，被当成 Shift+左键取整组）。
+  3. 调整鼠标滚轮翻页模式：由「一条一条」改为「一行一行」，并合并同一 tick 内的多次滚轮事件（第 21 轮 Bug 2）。
+- **发布**：`main` 快进合并 `fix/lock-crash-and-scroll`，打 tag `v1.0.3` 后推送 GitHub；release 附件为 `sninfinitepack-1.0.3-mc1.7.10.jar` + `sninfinitepack-1.0.3-mc1.12.2.jar`。
+- **安全核查（发布前全历史扫描）**：密码/token/API key/私钥/URL 内嵌凭据 **0 命中**；`.env` 未入库（仅 `.env.example` 占位）。唯一敏感项是旧机内网 IP `192.168.1.243`（仅出现在代理解释处），本轮已从 HEAD 文档移除；**它仍存在于更早的历史提交中**（彻底清除需要重写历史 + 强推，未执行）。
+- **推送认证**：本机 HTTPS 直连 GitHub 被墙且无可用凭据（无 gh CLI、无 credential 缓存），改用已配置的 SSH key `~/.ssh/id_ed25519_github`（`git@github.com`，身份 `shanghuo`）推送。
+
 ---
 
-## 3. 当前现状（1.0.2 · 文件 NBT 存储 + 强制生存）
+## 3. 当前现状（1.0.3 · 文件 NBT 存储 + 强制生存）
 
 ### 已实现功能
 - **存入**：手拿物品点条目格（插到该格）/ Shift+玩家背包物品整组存入 → `count += 数量`。
@@ -311,7 +329,7 @@ Minecraft **1.7.10 / Forge 10.13.4.1614（GTNH 2.8.4 实测环境）+ 1.12.2 / F
 - 容器：`mcmod-dev`（构建）—— **只可启动/停止，不要删除**。
 
 ### 代理（2026-09-23 换机后更新）
-- 代理从旧机的 `192.168.1.243:7890` 换成本机 `127.0.0.1:7897`（Clash Verge / verge-mihomo）。
+- 代理从旧机的局域网地址换成本机 `127.0.0.1:7897`（Clash Verge / verge-mihomo）。
 - **容器内不能写 `127.0.0.1`**（那是容器自己），`docker/.env` 必须写 `PROXY_HOST=host.docker.internal:7897`。
 - 本机直连各源站也通（gradle/maven/forge/mojang/GTNH/adoptium/debian 实测全 OK），但保持走代理更稳、且不改任何镜像源。
 
@@ -322,19 +340,19 @@ docker compose -f C:\projects\2608-mc\docker\compose.yaml up -d
 
 # 构建 1.7.10 并复制到 dist（jar 带 -mc1.7.10 后缀）
 docker exec mcmod-dev bash /scripts/build_release_1.7.10.sh
-# 产物：C:\projects\2608-mc\docker\dist\sninfinitepack-1.0.2-mc1.7.10.jar
+# 产物：C:\projects\2608-mc\docker\dist\sninfinitepack-1.0.3-mc1.7.10.jar
 
 # 构建 1.12.2 并复制到 dist（jar 带 -mc1.12.2 后缀）
 docker exec mcmod-dev bash /scripts/build_release_1.12.2.sh
-# 产物：C:\projects\2608-mc\docker\dist\sninfinitepack-1.0.2-mc1.12.2.jar
+# 产物：C:\projects\2608-mc\docker\dist\sninfinitepack-1.0.3-mc1.12.2.jar
 ```
 
 ### 修改后必做
 1. 用 SRG/反编译源里的方法名（1.7.10 partial-MCP；1.12.2 是 MCP 名，反编译源在各自 `build/rfg/minecraft-src/`）。
 2. 构建成功后再安装。
 3. **先确认游戏已关闭**，再 `Copy-Item` 覆盖对应实例 mods 目录：
-   - 1.7.10 → `nw-mc-20251224-test\...\.minecraft\mods\sninfinitepack-1.0.2-mc1.7.10.jar`
-   - 1.12.2 → `hmcl\.minecraft\versions\1.12.2-Forge\mods\sninfinitepack-1.0.2-mc1.12.2.jar`
+   - 1.7.10 → `nw-mc-20251224-test\...\.minecraft\mods\sninfinitepack-1.0.3-mc1.7.10.jar`
+   - 1.12.2 → `hmcl\.minecraft\versions\1.12.2-Forge\mods\sninfinitepack-1.0.3-mc1.12.2.jar`
    - 并**移除旧版本 `sninfinitepack-*.jar` / `infinitepack-*.jar`**（同 modid 冲突会双加载）；校验 SHA256 与 dist 一致。
 4. 让用户重启游戏（或代启动）。
 

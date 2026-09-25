@@ -12,12 +12,12 @@ for f in build/libs/*.jar; do
   [ -e "$f" ] || continue
   base=$(basename "$f" .jar)
   case "$base" in
-    sninfinitepack-1.0.2)          cp "$f" /work/dist/sninfinitepack-1.0.2-mc1.12.2.jar ;;
-    sninfinitepack-1.0.2-dev)      cp "$f" /work/dist/sninfinitepack-1.0.2-mc1.12.2-dev.jar ;;
-    sninfinitepack-1.0.2-sources)  cp "$f" /work/dist/sninfinitepack-1.0.2-mc1.12.2-sources.jar ;;
+    sninfinitepack-1.0.3)          cp "$f" /work/dist/sninfinitepack-1.0.3-mc1.12.2.jar ;;
+    sninfinitepack-1.0.3-dev)      cp "$f" /work/dist/sninfinitepack-1.0.3-mc1.12.2-dev.jar ;;
+    sninfinitepack-1.0.3-sources)  cp "$f" /work/dist/sninfinitepack-1.0.3-mc1.12.2-sources.jar ;;
     *)                             echo "跳过未知 jar: $base" ;;
   esac
 done
-rm -f /work/dist/sninfinitepack-1.0.2.jar /work/dist/sninfinitepack-1.0.2-dev.jar /work/dist/sninfinitepack-1.0.2-sources.jar
+rm -f /work/dist/sninfinitepack-1.0.3.jar /work/dist/sninfinitepack-1.0.3-dev.jar /work/dist/sninfinitepack-1.0.3-sources.jar
 ls -la /work/dist/
 echo "==> done"

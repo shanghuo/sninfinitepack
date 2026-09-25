@@ -1,6 +1,6 @@
 # 得一即无限背包（SN Infinite Pack）模组
 
-- 版本：`sninfinitepack-1.0.2-mc1.7.10.jar`（1.7.10）/ `sninfinitepack-1.0.2-mc1.12.2.jar`（1.12.2）
+- 版本：`sninfinitepack-1.0.3-mc1.7.10.jar`（1.7.10）/ `sninfinitepack-1.0.3-mc1.12.2.jar`（1.12.2）
 - 适用：Minecraft **1.7.10**（Forge 10.13.4.1614）+ **1.12.2**（Forge 14.23.5.2864），原版/基础模组/整合包（如 GTNH）均可
 - **0 依赖**：只依赖 MC 原版 + Forge/FML 核心 API，不依赖任何第三方模组 / GTNH 特有内容。
 - **不冲突**：与其它模组不冲突、不覆盖任何内容；数据随服务器存档保存，重开不丢。
@@ -31,8 +31,8 @@
 
 ## 安装
 
-- **1.7.10 客户端**：把 `sninfinitepack-1.0.2-mc1.7.10.jar` 放入 `.minecraft/mods/`。
-- **1.12.2 客户端**：把 `sninfinitepack-1.0.2-mc1.12.2.jar` 放入 `.minecraft/mods/`。
+- **1.7.10 客户端**：把 `sninfinitepack-1.0.3-mc1.7.10.jar` 放入 `.minecraft/mods/`。
+- **1.12.2 客户端**：把 `sninfinitepack-1.0.3-mc1.12.2.jar` 放入 `.minecraft/mods/`。
 - **服务器**：与客户端**同版本**的 jar 放入服务器 `mods/` 目录（存储逻辑在服务端运行，**服务端必须也装**）。
 - **放入前先关闭游戏/服务器**，放入后重启；升级时先移除旧的 `sninfinitepack-*.jar`（同 modid 冲突会双加载）。
 

@@ -4,7 +4,7 @@
 		"modid": "sninfinitepack",
 		"name": "SN Infinite Pack",
 		"description": "得一即无限背包：放入任意物品得到一个条目，之后可无限取出（属性/附魔/耐久/NBT 完全一致）；相同变体自动吸收，不同耐久/附魔/属性各自独立；删除条目即不再可取。",
-		"version": "1.0.2",
+		"version": "1.0.3",
 		"mcversion": "1.12.2",
 		"url": "",
 		"updateUrl": "",
